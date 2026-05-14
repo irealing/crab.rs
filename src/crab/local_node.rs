@@ -4,6 +4,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use quinn::crypto::rustls::QuicServerConfig;
 use quinn::{Endpoint, ServerConfig};
+use tokio::select;
+use tokio_util::sync::CancellationToken;
+
+use crate::crab::utils::runit::Worker;
 
 use super::utils::crypto::{Config as TLSConfig, TLSProvider};
 
@@ -15,11 +19,17 @@ pub struct Config {
     id: String,
     listen: String,
 }
-struct LocalNode {
+
+struct localNode {
     node_id: String,
     endpoint: Arc<Endpoint>,
 }
-impl LocalNode {
+
+pub async fn create_local_node(cfg: Config, tls_cfg: TLSConfig) -> Result<impl Node, CrabError> {
+    localNode::new(cfg, tls_cfg).await
+}
+
+impl localNode {
     async fn new(cfg: Config, tls_cfg: TLSConfig) -> Result<Self, CrabError> {
         let addr = cfg.listen.parse::<SocketAddr>().map_err(|e| {
             log::warn!(
@@ -47,26 +57,39 @@ impl LocalNode {
             );
             e
         })?;
-        Ok(LocalNode {
+        Ok(localNode {
             node_id: cfg.listen,
             endpoint: Arc::new(endpoint),
         })
     }
 }
-#[async_trait::async_trait]
-impl Node for LocalNode {
+#[async_trait]
+impl Node for localNode {
     fn id(&self) -> &str {
         return &self.node_id;
     }
 }
-
+#[async_trait]
+impl Worker for localNode {
+    async fn run(&self, cancel: CancellationToken) -> Option<CrabError> {
+        loop {
+            select! {
+                _=cancel.cancelled()=>{
+                    break None;
+                },
+                _=self.endpoint.accept()=>{
+                }
+            }
+        }
+    }
+}
 mod tests {
-    use super::{Config, LocalNode, TLSConfig};
+    use super::{Config, TLSConfig, localNode};
 
     #[tokio::test]
     async fn test_create_local_node() {
         let tls_cfg = TLSConfig::load_default_config_file();
-        LocalNode::new(
+        localNode::new(
             Config {
                 id: "12345".to_string(),
                 listen: "127.0.0.1:65522".to_string(),

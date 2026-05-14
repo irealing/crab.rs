@@ -1,4 +1,8 @@
-use std::{fs::File, fs::read_to_string, io::BufReader, sync::Arc};
+use std::{
+    fs::{File, read_to_string},
+    io::BufReader,
+    sync::Arc,
+};
 
 use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
@@ -17,6 +21,7 @@ pub struct Config {
     cert: String,
     verify_client: bool,
 }
+
 impl Config {
     const DEFAULT_PRIV_KEY: &str = "private.key";
     const DEFAULT_CERT: &str = "cert.pem";
@@ -49,6 +54,7 @@ impl Config {
 pub struct TLSProvider {
     cfg: Config,
 }
+
 impl TLSProvider {
     pub fn from_config(cfg: Config) -> Self {
         Self { cfg: cfg }

@@ -10,7 +10,3 @@ type Manager = DashMap<String, dyn Node>;
 pub trait Node {
     fn id(&self) -> &str;
 }
-pub trait TLSProvider {
-    fn server_config() -> ServerConfig;
-    fn client_config() -> Option<ClientConfig>;
-}

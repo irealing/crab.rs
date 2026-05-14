@@ -1,9 +1,8 @@
+use tokio_util::sync::CancellationToken;
 mod crab;
-use crab::utils::crypto::Config;
 
-use crate::crab::utils::crypto::TLSProvider;
-fn main() {
-    let cfg = Config::load_default_config_file();
-    println!("local config {:?}", &cfg);
-    TLSProvider::from_config(cfg).build_client_config().unwrap();
+#[tokio::main]
+async fn main() {
+    let token = CancellationToken::new();
 }
+async fn wait_shutdown(token: CancellationToken) {}
