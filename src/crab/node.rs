@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
 use dashmap::DashMap;
-use rustls::{ClientConfig, ServerConfig};
 
-use super::errors::CrabError;
-use super::protocol::Command;
+use crate::crab::utils::runit::Worker;
+
 type Manager = DashMap<String, dyn Node>;
 #[async_trait::async_trait]
-pub trait Node {
+pub trait Node: Worker {
     fn id(&self) -> &str;
 }

@@ -41,6 +41,7 @@ impl Worker for WorkerGroup {
 pub fn worker_group(workers: Vec<Arc<dyn Worker>>) -> impl Worker {
     WorkerGroup { workers }
 }
+
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;
@@ -83,3 +84,7 @@ mod tests {
         .expect("expect error");
     }
 }
+#[cfg(windows)]
+mod win;
+#[cfg(windows)]
+pub use win::wait_exit;

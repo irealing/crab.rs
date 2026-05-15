@@ -16,6 +16,7 @@ impl CrabError {
     pub const KEY_NOT_FOUND: u32 = 3;
     pub const CRYPTO_ERROR: u32 = 4;
     pub const BAD_ADDR: u32 = 5;
+    pub const PARSE_ERROR: u32 = 6;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
 
     fn error_message(&self) -> &'static str {
@@ -27,6 +28,7 @@ impl CrabError {
                 Self::KEY_NOT_FOUND => "Key not found",
                 Self::CRYPTO_ERROR => "Crypto error",
                 Self::BAD_ADDR => "Bad addr",
+                Self::PARSE_ERROR => "Parse error",
                 _ => "Unknown error code",
             },
             _ => "",
