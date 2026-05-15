@@ -8,6 +8,8 @@ use tokio::select;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
+use crate::crab::default_node_manager;
+use crate::crab::node::Manager;
 use crate::crab::utils::runit::Worker;
 
 use super::utils::crypto::{Config as TLSConfig, TLSProvider};
@@ -20,13 +22,18 @@ pub struct Config {
     pub id: String,
     pub listen: String,
 }
-pub trait LocalNode: Node + Worker {}
-pub struct localNode {
+pub trait LocalEndpoint: Node + Worker {}
+pub struct LocalNodeInner {
     node_id: String,
     endpoint: Arc<Endpoint>,
+    manager: Arc<dyn Manager>,
 }
-
-impl localNode {
+impl LocalNodeInner {
+    async fn handshake(&self, _: quinn::Connection) -> Result<Arc<dyn Node>, CrabError> {
+        todo!("handshake");
+    }
+}
+impl LocalNodeInner {
     async fn new(cfg: Config, tls_cfg: TLSConfig) -> Result<Self, CrabError> {
         let addr = cfg.listen.parse::<SocketAddr>().map_err(|e| {
             log::warn!("bad addr {} error:{}", &cfg.listen, e);
@@ -42,21 +49,22 @@ impl localNode {
             log::warn!("bind quic addr {} error {}", cfg.listen, e);
             e
         })?;
-        Ok(localNode {
+        Ok(LocalNodeInner {
             node_id: cfg.id,
             endpoint: Arc::new(endpoint),
+            manager: Arc::new(default_node_manager()),
         })
     }
 }
-impl LocalNode for localNode {}
+impl LocalEndpoint for LocalNodeInner {}
 #[async_trait]
-impl Node for localNode {
+impl Node for LocalNodeInner {
     fn id(&self) -> &str {
         return &self.node_id;
     }
 }
 #[async_trait]
-impl Worker for localNode {
+impl Worker for LocalNodeInner {
     async fn run(&self, cancel: CancellationToken) -> Option<CrabError> {
         log::info!("local node {} start", &self.node_id);
         let mut tasks = JoinSet::new();
@@ -67,16 +75,26 @@ impl Worker for localNode {
                 },
                 accepted=self.endpoint.accept()=>{
                     if let Some(incoming)=accepted{
+                        let manager=Arc::clone(&self.manager);
                         tasks.spawn(async move {
-                            incoming.await
+                            let conn=incoming.await.map_err(|e|{
+                                log::warn!("quic connection handshake error {}",e);
+                                CrabError::ErrorCode(CrabError::CONNECT_HANDSHKE_ERROR)})?;
+                            manager.handshake(conn).await.inspect_err(|e|{
+                                log::warn!("node handshake failed,error {}",e);
+                            })
                         });
                     }else{
                         break;
                     }
                 },
-                Some(handshake_ret)=tasks.join_next()=>{
-                    match handshake_ret {
-                        Ok(_)=>log::info!(""),
+                Some(join_ret)=tasks.join_next()=>{
+                    match join_ret {
+                        Ok(ret)=>{
+                            if let Ok(node)=ret{
+                                log::info!("node {} handshake success",node.id());
+                            }
+                        },
                         Err(e)=>log::warn!("quic connection handshake error {}",e),
                     }
                 },
@@ -86,16 +104,23 @@ impl Worker for localNode {
         None
     }
 }
-pub async fn create_local_node(c: Config, tls_cfg: TLSConfig) -> Result<impl LocalNode, CrabError> {
-    localNode::new(c, tls_cfg).await
+pub async fn create_local_node(
+    c: Config,
+    tls_cfg: TLSConfig,
+) -> Result<impl LocalEndpoint, CrabError> {
+    LocalNodeInner::new(c, tls_cfg).await
 }
 mod tests {
-    use super::{Config, TLSConfig, localNode};
+    use std::sync::Arc;
+
+    use crate::crab::default_node_manager;
+
+    use super::{Config, LocalNodeInner, TLSConfig};
 
     #[tokio::test]
     async fn test_create_local_node() {
         let tls_cfg = TLSConfig::load_default_config_file();
-        localNode::new(
+        LocalNodeInner::new(
             Config {
                 id: "12345".to_string(),
                 listen: "127.0.0.1:65522".to_string(),
