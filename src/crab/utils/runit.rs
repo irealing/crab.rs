@@ -1,47 +1,51 @@
 use super::super::errors::CrabError;
-use std::{option::Option, sync::Arc};
+use std::sync::Arc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 #[async_trait::async_trait]
 pub trait Worker: Send + Sync {
-    async fn run(&self, token: CancellationToken) -> Option<CrabError>;
+    async fn start(&self, token: CancellationToken) -> Result<(), CrabError>;
 }
 
 struct WorkerGroup {
     workers: Vec<Arc<dyn Worker>>,
 }
+pub fn worker_group(workers: Vec<Arc<dyn Worker>>) -> impl Worker {
+    WorkerGroup { workers }
+}
 #[async_trait::async_trait]
 impl Worker for WorkerGroup {
-    async fn run(&self, token: CancellationToken) -> Option<CrabError> {
+    async fn start(&self, token: CancellationToken) -> Result<(), CrabError> {
         let mut join_set = JoinSet::new();
         for worker in &self.workers {
             let worker = worker.clone();
             let token = token.clone();
-            join_set.spawn(async move { worker.run(token).await });
+            join_set.spawn(async move { worker.start(token).await });
         }
-        let mut ret = None;
-        while let Some(result) = join_set.join_next().await {
-            match result {
-                Ok(Some(err)) => {
+        let mut first_err = None;
+        while let Some(res) = join_set.join_next().await {
+            match res {
+                Err(e) => {
+                    log::warn!("Worker task failed: {}", e);
                     token.cancel();
-                    if ret.is_none() {
-                        ret = Some(err);
-                    }
+                    first_err.get_or_insert(CrabError::ErrorCode(CrabError::ASYNC_RUNTIME_ERROR));
                 }
-                Ok(None) => continue,
-                Err(join_err) => {
-                    log::warn!("{}:{} Worker task failed: {}", file!(), line!(), join_err);
-                    return Some(CrabError::ErrorCode(CrabError::ASYNC_RUNTIME_ERROR));
+                Ok(Err(e)) => {
+                    token.cancel();
+                    first_err.get_or_insert(e);
+                }
+                _ => {
+                    continue;
                 }
             }
         }
-        ret
+        if let Some(err) = first_err {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 }
-pub fn worker_group(workers: Vec<Arc<dyn Worker>>) -> impl Worker {
-    WorkerGroup { workers }
-}
-
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;
@@ -54,11 +58,11 @@ mod tests {
     struct LocalWorker(u64);
     #[async_trait::async_trait]
     impl Worker for LocalWorker {
-        async fn run(&self, token: CancellationToken) -> Option<CrabError> {
+        async fn start(&self, token: CancellationToken) -> Result<(), CrabError> {
             eprintln!("{}:{} LocalWorker:run {}", file!(), line!(), self.0);
             if self.0 % 2 != 0 {
                 tokio::time::sleep(Duration::from_secs(self.0)).await;
-                return Some(CrabError::ErrorCode(CrabError::UNKNOWN_ERROR));
+                return Err(CrabError::ErrorCode(CrabError::UNKNOWN_ERROR));
             }
             select! {
                 _=tokio::time::sleep(Duration::from_secs(self.0))=>{
@@ -68,7 +72,7 @@ mod tests {
                     eprintln!("{}:{} LocalWorker({})::run cancelled",file!(),line!(),self.0);
                 }
             }
-            None
+            Ok(())
         }
     }
     #[tokio::test]
@@ -78,10 +82,9 @@ mod tests {
             Arc::new(LocalWorker(10)),
             Arc::new(LocalWorker(20)),
         ])
-        .run(CancellationToken::new())
+        .start(CancellationToken::new())
         .await
-        .filter(|e| matches!(e, CrabError::ErrorCode(_)))
-        .expect("expect error");
+        .unwrap_err();
     }
 }
 #[cfg(windows)]
