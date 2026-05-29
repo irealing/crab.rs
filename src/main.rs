@@ -1,24 +1,15 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
+
+use crate::crab::utils::runit::{WaitExitWorker, Worker, worker_group};
 mod crab;
 
-use crab::{
-    CrabError,
-    utils::runit::{Worker, wait_exit},
-};
-
-mod config;
-struct WaitExitWorker;
-impl WaitExitWorker {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-const DEFAULT_CONFIG_FILE: &str = "@config.toml";
 #[tokio::main]
 async fn main() {
     logforth::starter_log::stderr().apply();
+    worker_group(vec![Arc::new(WaitExitWorker::new())])
+        .serve(CancellationToken::new())
+        .await
+        .unwrap();
 }

@@ -4,23 +4,29 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 #[async_trait::async_trait]
 pub trait Worker: Send + Sync {
-    async fn start(&self, token: CancellationToken) -> Result<(), CrabError>;
+    async fn serve(&self, token: CancellationToken) -> Result<(), CrabError>;
 }
 
 struct WorkerGroup {
     workers: Vec<Arc<dyn Worker>>,
 }
-pub fn worker_group(workers: Vec<Arc<dyn Worker>>) -> impl Worker {
-    WorkerGroup { workers }
+impl WorkerGroup {
+    fn new(workers: Vec<Arc<dyn Worker>>) -> Self {
+        Self { workers }
+    }
 }
+pub fn worker_group(workers: Vec<Arc<dyn Worker>>) -> impl Worker {
+    WorkerGroup::new(workers)
+}
+
 #[async_trait::async_trait]
 impl Worker for WorkerGroup {
-    async fn start(&self, token: CancellationToken) -> Result<(), CrabError> {
+    async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
         let mut join_set = JoinSet::new();
         for worker in &self.workers {
             let worker = worker.clone();
             let token = token.clone();
-            join_set.spawn(async move { worker.start(token).await });
+            join_set.spawn(async move { worker.serve(token).await });
         }
         let mut first_err = None;
         while let Some(res) = join_set.join_next().await {
@@ -46,6 +52,19 @@ impl Worker for WorkerGroup {
         }
     }
 }
+
+pub struct WaitExitWorker;
+impl WaitExitWorker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+#[async_trait::async_trait]
+impl Worker for WaitExitWorker {
+    async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
+        wait_exit(token).await
+    }
+}
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;
@@ -58,7 +77,7 @@ mod tests {
     struct LocalWorker(u64);
     #[async_trait::async_trait]
     impl Worker for LocalWorker {
-        async fn start(&self, token: CancellationToken) -> Result<(), CrabError> {
+        async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
             eprintln!("{}:{} LocalWorker:run {}", file!(), line!(), self.0);
             if self.0 % 2 != 0 {
                 tokio::time::sleep(Duration::from_secs(self.0)).await;
@@ -82,7 +101,7 @@ mod tests {
             Arc::new(LocalWorker(10)),
             Arc::new(LocalWorker(20)),
         ])
-        .start(CancellationToken::new())
+        .serve(CancellationToken::new())
         .await
         .unwrap_err();
     }
