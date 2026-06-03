@@ -1,8 +1,11 @@
 mod errors;
+mod local_node;
 mod manager;
 mod node;
 mod proto;
+mod remote_node;
 pub mod utils;
 pub use errors::CrabError;
+pub use local_node::{LocalNodeConfig, create_local_node};
 pub use manager::default_node_manager;
 pub use node::Node;

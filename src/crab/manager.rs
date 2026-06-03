@@ -1,9 +1,9 @@
+use super::node::HandshakeRet;
 use super::{CrabError, Node};
 use crate::crab::node::Manager;
 use dashmap::DashMap;
 use quinn::Connection;
 use std::sync::Arc;
-
 struct DefaultNodeManager {
     mapping: DashMap<String, Arc<dyn Node>>,
 }
@@ -16,7 +16,7 @@ impl DefaultNodeManager {
 }
 #[async_trait::async_trait]
 impl Manager for DefaultNodeManager {
-    async fn handshake(&self, _: Connection) -> Result<Arc<dyn Node>, CrabError> {
+    async fn handshake(&self, _: Connection) -> Result<HandshakeRet, CrabError> {
         todo!("implements me: handshake");
     }
     fn get(&self, id: &str) -> Option<Arc<dyn Node>> {
