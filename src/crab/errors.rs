@@ -19,7 +19,7 @@ impl CrabError {
     pub const PARSE_ERROR: u32 = 6;
     pub const IO_BAD_MESSAGE: u32 = 7;
     pub const NO_PAYLOAD: u32 = 8;
-    pub const CONNECT_HANDSHKE_ERROR: u32 = 9;
+    pub const CONNECT_HANDSHAKE_ERROR: u32 = 9;
     pub const HANDSHAKE_ERROR: u32 = 10;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
 
@@ -35,7 +35,7 @@ impl CrabError {
                 Self::PARSE_ERROR => "Parse error",
                 Self::IO_BAD_MESSAGE => "Bad message format",
                 Self::NO_PAYLOAD => "No payload",
-                Self::CONNECT_HANDSHKE_ERROR => "connection handshake error",
+                Self::CONNECT_HANDSHAKE_ERROR => "connection handshake error",
                 Self::HANDSHAKE_ERROR => "Handshake error",
                 _ => "Unknown error code",
             },

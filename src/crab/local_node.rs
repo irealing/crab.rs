@@ -3,10 +3,12 @@ use std::sync::Arc;
 use crate::crab::Node;
 use crate::crab::utils::runit::Worker;
 
+use super::node::NodeStatus;
 use super::remote_node::RemoteNode;
 use super::{CrabError, utils::crypto::TLSProvider};
 use quinn::{Endpoint, ServerConfig, crypto::rustls::QuicServerConfig};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use tokio::sync::watch;
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 #[derive(Deserialize, Debug)]
@@ -18,6 +20,8 @@ struct LocalNodeInner {
     tls: TLSProvider,
     cfg: LocalNodeConfig,
     endpoint: Endpoint,
+    status_tx: watch::Sender<NodeStatus>,
+    status_rx: watch::Receiver<NodeStatus>,
 }
 impl LocalNodeInner {
     fn new(cfg: LocalNodeConfig, tls: TLSProvider) -> Result<LocalNodeInner, CrabError> {
@@ -38,8 +42,15 @@ impl LocalNodeInner {
             log::warn!("listen on {} error {}", cfg.bind_address, err);
             err
         })?;
+        let (status_tx, status_rx) = watch::channel(NodeStatus::Ready);
         log::warn!("listen on {}", cfg.bind_address);
-        Ok(LocalNodeInner { tls, cfg, endpoint })
+        Ok(LocalNodeInner {
+            tls,
+            cfg,
+            endpoint,
+            status_tx,
+            status_rx,
+        })
     }
     async fn handshake(
         self: Arc<Self>,
@@ -77,14 +88,15 @@ impl LocalNodeInner {
                         },
                     }
                 }
-                handshek_ret=join_set.join_next()=>{
-                    if let Some(Ok(Ok(node)))=handshek_ret{
+                handshake_ret=join_set.join_next()=>{
+                    if let Some(Ok(Ok(node)))=handshake_ret{
                        let _= tx.send(node).await.inspect_err(|e|{
                             log::error!("send remote node error {}",e);
                         });
                     }
                 }
                 _=cancel.cancelled()=>{
+                    self.set_status(NodeStatus::Stopping);
                     break;
                 }
             }
@@ -131,6 +143,9 @@ impl LocalNodeInner {
         let (accept_cancel, serve_cancel) = (cancel.clone(), cancel.clone());
         join_set.spawn(async move { self_accept.listen(accept_cancel, tx).await });
         join_set.spawn(async move { self_serve.serve_all_node(serve_cancel, rx).await });
+        self.status_tx
+            .send(NodeStatus::Runing)
+            .expect("send should never fail");
         let mut r = None;
         while let Some(ret) = join_set.join_next().await {
             match ret {
@@ -143,8 +158,20 @@ impl LocalNodeInner {
                 }
                 _ => continue,
             }
+            self.set_status(NodeStatus::Stopping);
         }
+        self.set_status(NodeStatus::Stopped);
         if let Some(err) = r { Err(err) } else { Ok(()) }
+    }
+    fn set_status(&self, status: NodeStatus) {
+        self.status_tx.send_if_modified(|val| {
+            if *val != status {
+                *val = status.clone();
+                true
+            } else {
+                false
+            }
+        });
     }
 }
 
@@ -170,5 +197,8 @@ impl Worker for LocalNode {
 impl Node for LocalNode {
     fn id(&self) -> &str {
         return &self.inner.cfg.node_id;
+    }
+    fn status(&self) -> NodeStatus {
+        return *self.inner.status_rx.borrow();
     }
 }

@@ -29,13 +29,13 @@ async fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 async fn start(cfg: config::Config) -> Result<(), CrabError> {
-    let loca_node = Arc::new(create_local_node(
+    let local_node = Arc::new(create_local_node(
         TLSProvider::from_config(cfg.tls),
         cfg.node,
     )?);
     let workers: Vec<Arc<dyn Worker>> = vec![
         Arc::new(WaitExitWorker::new()),
-        loca_node as Arc<dyn Worker>,
+        local_node as Arc<dyn Worker>,
     ];
     worker_group(workers).serve(CancellationToken::new()).await
 }

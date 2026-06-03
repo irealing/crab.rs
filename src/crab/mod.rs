@@ -4,6 +4,7 @@ mod manager;
 mod node;
 mod proto;
 mod remote_node;
+mod remote_node_handle;
 pub mod utils;
 pub use errors::CrabError;
 pub use local_node::{LocalNodeConfig, create_local_node};

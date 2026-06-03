@@ -1,12 +1,19 @@
+use std::sync::Arc;
+
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use crate::crab::{CrabError, Node};
+use crate::crab::{CrabError, Node, node::NodeStatus};
 
 use super::utils::runit::Worker;
-
-pub(super) struct RemoteNode {
+struct RemoteNodeInner {
     node_id: String,
-    conn: quinn::Connecting,
+    conn: quinn::Connection,
+    status_tx: watch::Sender<NodeStatus>,
+    status_rx: watch::Receiver<NodeStatus>,
+}
+pub(super) struct RemoteNode {
+    inner: Arc<RemoteNodeInner>,
 }
 #[async_trait::async_trait]
 impl Worker for RemoteNode {
@@ -16,6 +23,9 @@ impl Worker for RemoteNode {
 }
 impl Node for RemoteNode {
     fn id(&self) -> &str {
-        return &self.node_id;
+        return &self.inner.node_id;
+    }
+    fn status(&self) -> NodeStatus {
+        *self.inner.status_rx.borrow()
     }
 }
