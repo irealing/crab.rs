@@ -14,7 +14,7 @@ pub trait Node: Worker {
     fn status(&self) -> NodeStatus;
 }
 pub struct HandshakeRet {
-    node_id: String,
+    pub node_id: String,
 }
 #[async_trait::async_trait]
 pub trait Manager: Send + Sync {

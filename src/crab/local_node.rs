@@ -1,11 +1,15 @@
 use std::sync::Arc;
 
 use crate::crab::Node;
+use crate::crab::proto::Protocol;
+use crate::crab::protocol_wrap::ProtocolWrapper;
 use crate::crab::utils::runit::Worker;
 
 use super::node::NodeStatus;
 use super::remote_node::RemoteNode;
 use super::{CrabError, utils::crypto::TLSProvider};
+use quinn::ClientConfig;
+use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{Endpoint, ServerConfig, crypto::rustls::QuicServerConfig};
 use serde::Deserialize;
 use tokio::sync::watch;
@@ -15,19 +19,35 @@ use tokio_util::sync::CancellationToken;
 pub struct LocalNodeConfig {
     pub bind_address: String,
     pub node_id: String,
+    pub remote_addr: Option<Vec<String>>,
 }
-struct LocalNodeInner {
-    tls: TLSProvider,
+struct LocalNodeInner<S, H>
+where
+    S: 'static,
+    H: 'static,
+{
     cfg: LocalNodeConfig,
     endpoint: Endpoint,
+    protocol: Arc<ProtocolWrapper<S, H>>,
     status_tx: watch::Sender<NodeStatus>,
     status_rx: watch::Receiver<NodeStatus>,
 }
-impl LocalNodeInner {
-    fn new(cfg: LocalNodeConfig, tls: TLSProvider) -> Result<LocalNodeInner, CrabError> {
+impl<S, H> LocalNodeInner<S, H> {
+    fn new(
+        cfg: LocalNodeConfig,
+        tls: TLSProvider,
+        protocol: Box<dyn Protocol<Handshake = S, Heartbeat = H>>,
+    ) -> Result<LocalNodeInner<S, H>, CrabError> {
         let server_config = ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(tls.build_server_config()?).map_err(|err| {
                 log::error!("build quic server config error {}", err);
+                CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
+            })?,
+        ));
+        let client_crypto_cfg = tls.build_client_config()?;
+        let client_config = ClientConfig::new(Arc::new(
+            QuicClientConfig::try_from(client_crypto_cfg).map_err(|e| {
+                log::error!("build quic client config error{}", e);
                 CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
             })?,
         ));
@@ -39,17 +59,22 @@ impl LocalNodeInner {
             })?,
         )
         .map_err(|err| {
-            log::warn!("listen on {} error {}", cfg.bind_address, err);
+            log::info!("listen on {} error {}", cfg.bind_address, err);
             err
+        })
+        .map(|e| {
+            let mut e = e;
+            e.set_default_client_config(client_config);
+            e
         })?;
         let (status_tx, status_rx) = watch::channel(NodeStatus::Ready);
         log::warn!("listen on {}", cfg.bind_address);
         Ok(LocalNodeInner {
-            tls,
-            cfg,
-            endpoint,
-            status_tx,
-            status_rx,
+            cfg: cfg,
+            endpoint: endpoint,
+            protocol: ProtocolWrapper::new(protocol),
+            status_tx: status_tx,
+            status_rx: status_rx,
         })
     }
     async fn handshake(
@@ -136,7 +161,16 @@ impl LocalNodeInner {
         }
         Ok(())
     }
-    async fn start(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
+    async fn serve(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
+        self.start_listen(cancel).await
+    }
+    async fn start_remote_connect(
+        self: Arc<Self>,
+        cancel: CancellationToken,
+    ) -> Result<(), CrabError> {
+        todo!("")
+    }
+    async fn start_listen(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
         let (tx, rx) = mpsc::channel::<RemoteNode>(10);
         let mut join_set = JoinSet::new();
         let (self_accept, self_serve) = (self.clone(), self.clone());
@@ -175,30 +209,46 @@ impl LocalNodeInner {
     }
 }
 
-pub fn create_local_node(tls: TLSProvider, cfg: LocalNodeConfig) -> Result<impl Node, CrabError> {
-    LocalNode::new(tls, cfg)
+struct LocalNode<S, H>
+where
+    S: 'static,
+    H: 'static,
+{
+    inner: Arc<LocalNodeInner<S, H>>,
 }
-struct LocalNode {
-    inner: Arc<LocalNodeInner>,
-}
-impl LocalNode {
-    pub fn new(tls: TLSProvider, cfg: LocalNodeConfig) -> Result<Self, CrabError> {
+impl<S, H> LocalNode<S, H> {
+    pub fn new(
+        tls: TLSProvider,
+        cfg: LocalNodeConfig,
+        protocol: Box<dyn Protocol<Handshake = S, Heartbeat = H>>,
+    ) -> Result<Self, CrabError> {
         Ok(LocalNode {
-            inner: Arc::new(LocalNodeInner::new(cfg, tls)?),
+            inner: Arc::new(LocalNodeInner::new(cfg, tls, protocol)?),
         })
     }
 }
 #[async_trait::async_trait]
-impl Worker for LocalNode {
+impl<S, H> Worker for LocalNode<S, H> {
     async fn serve(&self, cancel: CancellationToken) -> Result<(), CrabError> {
-        self.inner.clone().start(cancel).await
+        self.inner.clone().serve(cancel).await
     }
 }
-impl Node for LocalNode {
+impl<S, H> Node for LocalNode<S, H> {
     fn id(&self) -> &str {
         return &self.inner.cfg.node_id;
     }
     fn status(&self) -> NodeStatus {
         return *self.inner.status_rx.borrow();
     }
+}
+pub fn create_local_node<S, H>(
+    tls: TLSProvider,
+    cfg: LocalNodeConfig,
+    protocol: Box<dyn Protocol<Handshake = S, Heartbeat = H>>,
+) -> Result<impl Node, CrabError>
+where
+    S: 'static,
+    H: 'static,
+{
+    LocalNode::new(tls, cfg, protocol)
 }

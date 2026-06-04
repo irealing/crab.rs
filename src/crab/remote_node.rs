@@ -6,11 +6,13 @@ use tokio_util::sync::CancellationToken;
 use crate::crab::{CrabError, Node, node::NodeStatus};
 
 use super::utils::runit::Worker;
+
 struct RemoteNodeInner {
     node_id: String,
     conn: quinn::Connection,
     status_tx: watch::Sender<NodeStatus>,
     status_rx: watch::Receiver<NodeStatus>,
+    client: bool,
 }
 pub(super) struct RemoteNode {
     inner: Arc<RemoteNodeInner>,

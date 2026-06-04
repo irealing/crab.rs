@@ -3,6 +3,7 @@ mod local_node;
 mod manager;
 mod node;
 mod proto;
+mod protocol_wrap;
 mod remote_node;
 mod remote_node_handle;
 pub mod utils;
