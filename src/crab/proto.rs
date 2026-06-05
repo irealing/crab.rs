@@ -75,9 +75,6 @@ pub trait Protocol: Send + Sync {
             node_id: packet.node_id().to_string(),
         })
     }
-    fn on_connect(&self, _: &dyn Node) -> Result<(), CrabError> {
-        Ok(())
-    }
     fn on_heartbeat(
         &self,
         _: &dyn Node,
@@ -85,5 +82,4 @@ pub trait Protocol: Send + Sync {
     ) -> Result<Self::Heartbeat, CrabError> {
         self.make_heartbeat()
     }
-    fn on_close(&self, _: &dyn Node) {}
 }
