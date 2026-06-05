@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use tokio::sync::watch;
@@ -10,6 +11,7 @@ use super::utils::runit::Worker;
 struct RemoteNodeInner {
     node_id: String,
     conn: quinn::Connection,
+    local_addr: SocketAddr,
     status_tx: watch::Sender<NodeStatus>,
     status_rx: watch::Receiver<NodeStatus>,
     client: bool,
@@ -29,5 +31,8 @@ impl Node for RemoteNode {
     }
     fn status(&self) -> NodeStatus {
         *self.inner.status_rx.borrow()
+    }
+    fn addr(&self) -> SocketAddr {
+        self.inner.local_addr
     }
 }

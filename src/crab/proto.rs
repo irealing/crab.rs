@@ -1,4 +1,4 @@
-use crate::crab::{CrabError, Node, node::HandshakeRet};
+use crate::crab::{CrabError, Node};
 use bincode_next::config;
 use bincode_next::serde::decode_from_slice;
 use binrw::{BinRead, BinWrite, binrw};
@@ -57,12 +57,17 @@ where
         Ok(Some((header, ret)))
     }
 }
+
+pub struct HandshakeRet {
+    pub node_id: String,
+}
+
 pub trait HandshakePacket: DeserializeOwned {
     fn node_id(&self) -> &str;
 }
 pub trait Protocol: Send + Sync {
-    type Handshake: HandshakePacket;
-    type Heartbeat: DeserializeOwned + Serialize;
+    type Handshake: HandshakePacket + 'static;
+    type Heartbeat: DeserializeOwned + Serialize + 'static;
     fn make_handshake(&self) -> Result<Self::Handshake, CrabError>;
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError>;
     fn on_handshake(&self, packet: &Self::Handshake) -> Result<HandshakeRet, CrabError> {

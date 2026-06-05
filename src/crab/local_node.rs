@@ -1,9 +1,9 @@
+use super::{Node, utils};
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
-use crate::crab::Node;
-use crate::crab::proto::Protocol;
-use crate::crab::protocol_wrap::ProtocolWrapper;
-use crate::crab::utils::runit::Worker;
+use super::utils::runit::Worker;
 
 use super::node::NodeStatus;
 use super::remote_node::RemoteNode;
@@ -13,31 +13,47 @@ use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{Endpoint, ServerConfig, crypto::rustls::QuicServerConfig};
 use serde::Deserialize;
 use tokio::sync::watch;
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::task::JoinError;
+use tokio::{sync::mpsc, task::JoinSet, time};
 use tokio_util::sync::CancellationToken;
+
 #[derive(Deserialize, Debug)]
 pub struct LocalNodeConfig {
     pub bind_address: String,
     pub node_id: String,
+    #[serde(default)]
+    pub listen: bool,
+    #[serde(default)]
     pub remote_addr: Option<Vec<String>>,
+    #[serde(default)]
+    pub options: Options,
 }
-struct LocalNodeInner<S, H>
-where
-    S: 'static,
-    H: 'static,
-{
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+pub struct Options {
+    pub handshake_time: u64,
+    pub heartbeat_interval: u64,
+    pub heartbeat_timeout: u64,
+}
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            handshake_time: 10,
+            heartbeat_interval: 15,
+            heartbeat_timeout: 30,
+        }
+    }
+}
+struct LocalNodeInner {
     cfg: LocalNodeConfig,
     endpoint: Endpoint,
-    protocol: Arc<ProtocolWrapper<S, H>>,
     status_tx: watch::Sender<NodeStatus>,
     status_rx: watch::Receiver<NodeStatus>,
+    local_addr: SocketAddr,
 }
-impl<S, H> LocalNodeInner<S, H> {
-    fn new(
-        cfg: LocalNodeConfig,
-        tls: TLSProvider,
-        protocol: Box<dyn Protocol<Handshake = S, Heartbeat = H>>,
-    ) -> Result<LocalNodeInner<S, H>, CrabError> {
+impl LocalNodeInner {
+    const REMOTE_CONNECT_RETRY_DELAY: Duration = Duration::from_secs(10);
+    fn new(cfg: LocalNodeConfig, tls: TLSProvider) -> Result<LocalNodeInner, CrabError> {
         let server_config = ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(tls.build_server_config()?).map_err(|err| {
                 log::error!("build quic server config error {}", err);
@@ -68,13 +84,13 @@ impl<S, H> LocalNodeInner<S, H> {
             e
         })?;
         let (status_tx, status_rx) = watch::channel(NodeStatus::Ready);
-        log::warn!("listen on {}", cfg.bind_address);
+        let local_addr = endpoint.local_addr()?;
         Ok(LocalNodeInner {
             cfg: cfg,
             endpoint: endpoint,
-            protocol: ProtocolWrapper::new(protocol),
             status_tx: status_tx,
             status_rx: status_rx,
+            local_addr: local_addr,
         })
     }
     async fn handshake(
@@ -83,6 +99,26 @@ impl<S, H> LocalNodeInner<S, H> {
         _: CancellationToken,
     ) -> Result<RemoteNode, CrabError> {
         Err(CrabError::ErrorCode(CrabError::HANDSHAKE_ERROR))
+    }
+    async fn handshake_with_timeout(
+        self: Arc<Self>,
+        conn: quinn::Connection,
+        cancel: CancellationToken,
+    ) -> Result<RemoteNode, CrabError> {
+        let remote_addr = conn.remote_address();
+        log::debug!("handshake with timeout remote address {}", remote_addr);
+        let timeout = Duration::from_secs(self.cfg.options.handshake_time);
+        tokio::select! {
+            res=self.handshake(conn, cancel) => {
+                res.map_err(|e|{
+                    log::warn!("handshake error {} remote address {}", &e, remote_addr);
+                    e
+                })
+            }
+            _=time::sleep(timeout) => {
+                Err(CrabError::ErrorCode(CrabError::HANDSHAKE_TIMEOUT))
+            }
+        }
     }
     async fn listen(
         self: Arc<Self>,
@@ -99,7 +135,7 @@ impl<S, H> LocalNodeInner<S, H> {
                             let cancel_clone=cancel.clone();
                             join_set.spawn(async move   {
                                 match incoming.await{
-                                    Ok(conn)=>self_clone.handshake(conn, cancel_clone).await,
+                                    Ok(conn)=>self_clone.handshake_with_timeout(conn, cancel_clone).await,
                                     Err(err)=>{
                                         log::warn!("quic connection handshake error {}",err);
                                         Err(CrabError::ErrorCode(CrabError::HANDSHAKE_ERROR))
@@ -162,15 +198,119 @@ impl<S, H> LocalNodeInner<S, H> {
         Ok(())
     }
     async fn serve(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
-        self.start_listen(cancel).await
+        let mut join_set = JoinSet::new();
+        if self.cfg.listen {
+            let self_copy = self.clone();
+            let cancel_copy = cancel.clone();
+            join_set.spawn(async move {
+                let local_cancel = cancel_copy.clone();
+                if let Err(e) = self_copy.start_listen(local_cancel).await {
+                    log::error!("local node listen error {}", e);
+                    cancel_copy.cancel();
+                    Err(e)
+                } else {
+                    Ok(())
+                }
+            });
+        }
+        if self.cfg.remote_addr.is_some() {
+            let cancel_copy = cancel.clone();
+            let self_copy = self.clone();
+            join_set.spawn(async move { self_copy.start_all_remote_node(cancel_copy).await });
+        }
+        while let Some(res) = join_set.join_next().await {
+            match res {
+                Ok(Err(err)) => {
+                    log::error!("remote node join error {}", err);
+                }
+                Err(err) => {
+                    log::error!("local node worker join error {}", err);
+                }
+                _ => continue,
+            }
+        }
+        log::info!("local node worker finished");
+        Ok(())
     }
-    async fn start_remote_connect(
+    async fn start_all_remote_node(
         self: Arc<Self>,
         cancel: CancellationToken,
     ) -> Result<(), CrabError> {
-        todo!("")
+        let Some(remote_list) = self.cfg.remote_addr.clone().filter(|v| !v.is_empty()) else {
+            return Ok(());
+        };
+
+        let mut join_set = JoinSet::new();
+        for remote in remote_list {
+            let self_copy = self.clone();
+            let cancel_copy = cancel.clone();
+            join_set.spawn(async move { self_copy.start_remote_node(&remote, cancel_copy).await });
+        }
+        while let Some(_) = join_set.join_next().await {}
+        log::info!("remote node listen finished");
+        Ok(())
+    }
+    async fn start_remote_node(
+        self: Arc<Self>,
+        remote_addr: &str,
+        cancel: CancellationToken,
+    ) -> Result<(), CrabError> {
+        log::info!("connect to remote node {}", remote_addr);
+        loop {
+            let self_copy = self.clone();
+            let cancel_copy = cancel.clone();
+            tokio::select! {
+                Ok(node)=self_copy.connect_remote_node(remote_addr, cancel.clone()) =>{
+                    if let Err(err) =node.serve(cancel_copy).await{
+                        log::warn!("remote node {} connect error {}",remote_addr,err);
+                    }
+                }
+                _=cancel_copy.cancelled()=>{
+                    return Ok(())
+                }
+            }
+        }
+    }
+    async fn connect_remote_node(
+        self: Arc<Self>,
+        addr: &str,
+        cancel: CancellationToken,
+    ) -> Result<RemoteNode, CrabError> {
+        let (host, address_list) = utils::parse_remote_addr(addr).await?;
+        for addr in address_list {
+            log::info!("connect to remote node {} {}", host, addr);
+            match self.endpoint.connect(addr, host) {
+                Err(e) => {
+                    log::error!("connect to {}({}) fail,err {} ", host, addr, e);
+                    continue;
+                }
+                Ok(connecting) => {
+                    tokio::select! {
+                        res=connecting=>{
+                            match res{
+                                Ok(_)=>{
+                                    log::debug!("remote {} quic connection ready",host);
+                                    return Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR));
+                                },
+                                Err(err)=>{
+                                    log::warn!("connect to {}({}) fail,err {} ", host, addr, err);
+                                    continue;
+                                }
+                            }
+                        }
+                        _=cancel.cancelled()=>{
+                            return Err(
+                                CrabError::ErrorCode(CrabError::CANCELED_ERROR)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
     async fn start_listen(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
+        log::info!("starting listen on {}", self.local_addr);
         let (tx, rx) = mpsc::channel::<RemoteNode>(10);
         let mut join_set = JoinSet::new();
         let (self_accept, self_serve) = (self.clone(), self.clone());
@@ -178,7 +318,7 @@ impl<S, H> LocalNodeInner<S, H> {
         join_set.spawn(async move { self_accept.listen(accept_cancel, tx).await });
         join_set.spawn(async move { self_serve.serve_all_node(serve_cancel, rx).await });
         self.status_tx
-            .send(NodeStatus::Runing)
+            .send(NodeStatus::Running)
             .expect("send should never fail");
         let mut r = None;
         while let Some(ret) = join_set.join_next().await {
@@ -209,46 +349,33 @@ impl<S, H> LocalNodeInner<S, H> {
     }
 }
 
-struct LocalNode<S, H>
-where
-    S: 'static,
-    H: 'static,
-{
-    inner: Arc<LocalNodeInner<S, H>>,
+struct LocalNode {
+    inner: Arc<LocalNodeInner>,
 }
-impl<S, H> LocalNode<S, H> {
-    pub fn new(
-        tls: TLSProvider,
-        cfg: LocalNodeConfig,
-        protocol: Box<dyn Protocol<Handshake = S, Heartbeat = H>>,
-    ) -> Result<Self, CrabError> {
+impl LocalNode {
+    pub fn new(tls: TLSProvider, cfg: LocalNodeConfig) -> Result<Self, CrabError> {
         Ok(LocalNode {
-            inner: Arc::new(LocalNodeInner::new(cfg, tls, protocol)?),
+            inner: Arc::new(LocalNodeInner::new(cfg, tls)?),
         })
     }
 }
 #[async_trait::async_trait]
-impl<S, H> Worker for LocalNode<S, H> {
+impl Worker for LocalNode {
     async fn serve(&self, cancel: CancellationToken) -> Result<(), CrabError> {
         self.inner.clone().serve(cancel).await
     }
 }
-impl<S, H> Node for LocalNode<S, H> {
+impl Node for LocalNode {
     fn id(&self) -> &str {
         return &self.inner.cfg.node_id;
     }
     fn status(&self) -> NodeStatus {
         return *self.inner.status_rx.borrow();
     }
+    fn addr(&self) -> SocketAddr {
+        self.inner.local_addr.clone()
+    }
 }
-pub fn create_local_node<S, H>(
-    tls: TLSProvider,
-    cfg: LocalNodeConfig,
-    protocol: Box<dyn Protocol<Handshake = S, Heartbeat = H>>,
-) -> Result<impl Node, CrabError>
-where
-    S: 'static,
-    H: 'static,
-{
-    LocalNode::new(tls, cfg, protocol)
+pub fn create_local_node(tls: TLSProvider, cfg: LocalNodeConfig) -> Result<impl Node, CrabError> {
+    LocalNode::new(tls, cfg)
 }

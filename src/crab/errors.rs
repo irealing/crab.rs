@@ -21,6 +21,10 @@ impl CrabError {
     pub const NO_PAYLOAD: u32 = 8;
     pub const CONNECT_HANDSHAKE_ERROR: u32 = 9;
     pub const HANDSHAKE_ERROR: u32 = 10;
+    pub const BAD_REMOTE_ADDR: u32 = 11;
+    pub const CONNECT_ERROR: u32 = 12;
+    pub const HANDSHAKE_TIMEOUT: u32 = 13;
+    pub const CANCELED_ERROR: u32 = 14;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
 
     fn error_message(&self) -> &'static str {
@@ -37,6 +41,10 @@ impl CrabError {
                 Self::NO_PAYLOAD => "No payload",
                 Self::CONNECT_HANDSHAKE_ERROR => "connection handshake error",
                 Self::HANDSHAKE_ERROR => "Handshake error",
+                Self::BAD_REMOTE_ADDR => "Bad remote address",
+                Self::CONNECT_ERROR => "Connection error",
+                Self::HANDSHAKE_TIMEOUT => "Handshake timeout",
+                Self::CANCELED_ERROR => "Canceled error",
                 _ => "Unknown error code",
             },
             _ => "",
