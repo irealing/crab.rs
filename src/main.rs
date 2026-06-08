@@ -2,8 +2,11 @@ use std::{process::ExitCode, sync::Arc};
 
 use tokio_util::sync::CancellationToken;
 
-use crate::crab::{CrabError, utils::runit::{WaitExitWorker, Worker, worker_group}, create_local_node};
 use crate::crab::utils::crypto::TLSProvider;
+use crate::crab::{
+    CrabError, create_local_node, protocol,
+    utils::runit::{WaitExitWorker, Worker, worker_group},
+};
 
 mod config;
 mod crab;
@@ -21,6 +24,8 @@ async fn main() -> ExitCode {
     if let Err(err) = start(cfg).await {
         log::error!("exit with error {}", err);
         return ExitCode::FAILURE;
+    } else {
+        log::info!("exit without error");
     }
     ExitCode::SUCCESS
 }
@@ -28,6 +33,7 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
     let local_node = Arc::new(create_local_node(
         TLSProvider::from_config(cfg.tls),
         cfg.node,
+        protocol::SimpleProtocol::new(),
     )?);
     let workers: Vec<Arc<dyn Worker>> = vec![
         Arc::new(WaitExitWorker::new()),

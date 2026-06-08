@@ -4,9 +4,9 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use crate::crab::{CrabError, Node, node::NodeStatus};
-
 use super::utils::runit::Worker;
+use crate::crab::proto::HandshakeRet;
+use crate::crab::{CrabError, Node, node::NodeStatus};
 
 struct RemoteNodeInner {
     node_id: String,
@@ -18,6 +18,21 @@ struct RemoteNodeInner {
 }
 pub(super) struct RemoteNode {
     inner: Arc<RemoteNodeInner>,
+}
+impl RemoteNode {
+    pub(super) fn new(ret: &HandshakeRet, conn: quinn::Connection) -> Self {
+        let (status_tx, status_rx) = watch::channel(NodeStatus::Ready);
+        Self {
+            inner: Arc::new(RemoteNodeInner {
+                node_id: ret.node_id.clone(),
+                local_addr: conn.remote_address(),
+                conn: conn,
+                status_tx: status_tx,
+                status_rx: status_rx,
+                client: false,
+            }),
+        }
+    }
 }
 #[async_trait::async_trait]
 impl Worker for RemoteNode {

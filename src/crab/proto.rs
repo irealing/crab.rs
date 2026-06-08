@@ -83,3 +83,25 @@ pub trait Protocol: Send + Sync {
         self.make_heartbeat()
     }
 }
+
+#[async_trait::async_trait]
+pub(super) trait Hook: Send + Sync {
+    async fn handshake(&self, _: &quinn::Connection) -> Result<HandshakeRet, CrabError> {
+        Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
+    }
+    async fn handshake_as_client(&self, _: &quinn::Connection) -> Result<HandshakeRet, CrabError> {
+        Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
+    }
+}
+pub(super) struct ProtoWrapper<S, H, P: Protocol<Handshake = S, Heartbeat = H>> {
+    protocol: P,
+}
+impl<S, H, P> ProtoWrapper<S, H, P>
+where
+    P: Protocol<Handshake = S, Heartbeat = H>,
+{
+    pub fn new(protocol: P) -> Self {
+        Self { protocol }
+    }
+}
+impl<S, H, P> Hook for ProtoWrapper<S, H, P> where P: Protocol<Handshake = S, Heartbeat = H> {}
