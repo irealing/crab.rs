@@ -5,9 +5,8 @@ use binrw::{BinRead, BinWrite, binrw};
 use bytes::BufMut;
 use quinn::{Connection, RecvStream, SendStream};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{io::Cursor, marker::PhantomData};
-use tokio_util::bytes::{Buf, BytesMut};
-use tokio_util::codec::Decoder;
+use std::io::Cursor;
+use tokio_util::bytes::BytesMut;
 
 #[derive(BinRead, BinWrite, Debug, PartialEq, Eq, Clone, Copy)]
 #[brw(repr = u16)]
@@ -29,7 +28,8 @@ pub struct MessageHeader {
     pub length: u32,
 }
 impl MessageHeader {
-    pub const OPTION_ERROR: u8 = 1 << 0;
+    pub const OPTION_NONE: u8 = 0;
+    pub const OPTION_ERROR: u8 = 1;
     pub fn ok(&self) -> bool {
         self.option & Self::OPTION_ERROR != Self::OPTION_ERROR
     }
@@ -55,39 +55,8 @@ impl AckMessage {
     }
 }
 
-pub struct MessageCodec<T>(PhantomData<T>);
 const HEADER_SIZE: usize = 12;
 const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
-impl<T> Decoder for MessageCodec<T>
-where
-    T: DeserializeOwned,
-{
-    type Item = (MessageHeader, T);
-    type Error = CrabError;
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.len() < HEADER_SIZE {
-            return Ok(None);
-        }
-        let header = MessageHeader::read(&mut Cursor::new(&src[..HEADER_SIZE])).map_err(|e| {
-            log::warn!("read message header error:{}", e);
-            CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE)
-        })?;
-        if header.length == 0 {
-            return Err(CrabError::ErrorCode(CrabError::NO_PAYLOAD));
-        }
-        let frame_size = header.length as usize + HEADER_SIZE;
-        if frame_size > src.len() {
-            return Ok(None);
-        }
-        let mut b = src.split_to(frame_size);
-        b.advance(HEADER_SIZE);
-        let (ret, read_bytes): (T, usize) = decode_from_slice(&b, config::standard())
-            .map_err(|_| CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE))?;
-        src.advance(read_bytes);
-        Ok(Some((header, ret)))
-    }
-}
-
 pub struct HandshakeRet {
     pub node_id: String,
 }
@@ -97,7 +66,7 @@ pub trait HandshakePacket: DeserializeOwned + Serialize + Send + Sync {
 }
 pub trait Protocol: Send + Sync {
     type Handshake: HandshakePacket + 'static;
-    type Heartbeat: DeserializeOwned + Serialize + 'static;
+    type Heartbeat: DeserializeOwned + Serialize + Send + Sync + 'static;
     fn make_handshake(&self) -> Result<Self::Handshake, CrabError>;
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError>;
     fn on_handshake(&self, _: &Self::Handshake) -> Result<Self::Handshake, CrabError> {
@@ -189,6 +158,12 @@ pub(super) trait Hook: Send + Sync {
     async fn handshake_as_client(&self, _: &Connection) -> Result<HandshakeRet, CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
+    async fn heartbeat(&self, _: &mut Stream) -> Result<(), CrabError> {
+        Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
+    }
+    async fn heartbeat_as_client(&self, _: &mut Stream) -> Result<(), CrabError> {
+        Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
+    }
 }
 pub(super) struct ProtoWrapper<S, H, P: Protocol<Handshake = S, Heartbeat = H>> {
     protocol: P,
@@ -206,7 +181,7 @@ impl<S, H, P> Hook for ProtoWrapper<S, H, P>
 where
     P: Protocol<Handshake = S, Heartbeat = H>,
     S: HandshakePacket + 'static,
-    H: DeserializeOwned + Serialize + 'static,
+    H: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
     async fn handshake(&self, conn: &Connection) -> Result<HandshakeRet, CrabError> {
         log::debug!("handshake with connection from {}", conn.remote_address());
@@ -267,5 +242,40 @@ where
         Ok(HandshakeRet {
             node_id: body.node_id().to_string(),
         })
+    }
+    async fn heartbeat(&self, stream: &mut Stream) -> Result<(), CrabError> {
+        match stream
+            .read_message::<P::Heartbeat>()
+            .await
+            .and_then(|_| self.protocol.make_heartbeat())
+        {
+            Err(err) => {
+                stream
+                    .write_error(Method::Heartbeat, MessageHeader::OPTION_ERROR, &err)
+                    .await
+            }
+            Ok(ret) => {
+                stream
+                    .write_message(Method::Heartbeat, MessageHeader::OPTION_NONE, &ret)
+                    .await
+            }
+        }
+    }
+    async fn heartbeat_as_client(&self, stream: &mut Stream) -> Result<(), CrabError> {
+        match self.protocol.make_heartbeat() {
+            Err(err) => {
+                log::warn!("make heartbeat failed {},write ack with error", err);
+                stream
+                    .write_error(Method::Heartbeat, MessageHeader::OPTION_ERROR, &err)
+                    .await?
+            }
+            Ok(ret) => {
+                stream
+                    .write_message(Method::Heartbeat, MessageHeader::OPTION_NONE, &ret)
+                    .await?
+            }
+        }
+        let _ = stream.read_message::<P::Heartbeat>().await?;
+        Ok(())
     }
 }

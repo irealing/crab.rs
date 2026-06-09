@@ -32,6 +32,7 @@ impl CrabError {
     pub const PAYLOAD_TOO_LARGE: u32 = 15;
     pub const BAD_MESSAGE_HEADER: u32 = 16;
     pub const DESERIALIZATION_ERROR: u32 = 17;
+    pub const HEARTBEAT_TIMEOUT: u32 = 18;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
 
     fn error_message(&self) -> &'static str {
@@ -55,6 +56,7 @@ impl CrabError {
                 Self::PAYLOAD_TOO_LARGE => "Payload too large",
                 Self::BAD_MESSAGE_HEADER => "Bad message header",
                 Self::DESERIALIZATION_ERROR => "Deserialization error",
+                Self::HEARTBEAT_TIMEOUT => "Heartbeat timeout",
                 _ => "Unknown error code",
             },
             _ => "",

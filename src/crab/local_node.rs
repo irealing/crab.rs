@@ -1,17 +1,17 @@
-use super::{utils, Node};
+use super::{Node, utils};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::utils::runit::Worker;
 
-use super::node::NodeStatus;
+use super::node::{NodeStatus, Options};
 use super::remote_node::RemoteNode;
-use super::{utils::crypto::TLSProvider, CrabError};
+use super::{CrabError, utils::crypto::TLSProvider};
 use crate::crab::proto::{HandshakePacket, HandshakeRet, Hook, ProtoWrapper, Protocol};
+use quinn::ClientConfig;
 use quinn::crypto::rustls::QuicClientConfig;
-use quinn::{crypto::rustls::QuicServerConfig, Endpoint, ServerConfig};
-use quinn::{ClientConfig, Connecting};
+use quinn::{Endpoint, ServerConfig, crypto::rustls::QuicServerConfig};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -30,14 +30,7 @@ pub struct LocalNodeConfig {
     #[serde(default)]
     pub options: Options,
 }
-#[derive(Debug, Deserialize, Clone)]
-#[serde(default)]
-pub struct Options {
-    pub connect_timeout: u64,
-    pub handshake_timeout: u64,
-    pub heartbeat_interval: u64,
-    pub heartbeat_timeout: u64,
-}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -66,7 +59,7 @@ impl LocalNodeInner {
     where
         P: Protocol<Handshake = S, Heartbeat = H> + 'static,
         S: HandshakePacket + 'static,
-        H: DeserializeOwned + Serialize + 'static,
+        H: DeserializeOwned + Serialize + Send + Sync + 'static,
     {
         let server_config = ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(tls.build_server_config()?).map_err(|err| {
@@ -100,11 +93,11 @@ impl LocalNodeInner {
         let (status_tx, status_rx) = watch::channel(NodeStatus::Ready);
         let local_addr = endpoint.local_addr()?;
         Ok(LocalNodeInner {
-            cfg: cfg,
-            endpoint: endpoint,
-            status_tx: status_tx,
-            status_rx: status_rx,
-            local_addr: local_addr,
+            cfg,
+            endpoint,
+            status_tx,
+            status_rx,
+            local_addr,
             hook: Arc::new(ProtoWrapper::new(protocol)),
         })
     }
@@ -144,7 +137,13 @@ impl LocalNodeInner {
                 Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
             }
         } {
-            Ok(ret) => Ok(RemoteNode::new(&ret, conn, as_client, self.hook.clone())),
+            Ok(ret) => Ok(RemoteNode::new(
+                &ret,
+                conn,
+                as_client,
+                self.hook.clone(),
+                self.cfg.options,
+            )),
             Err(err) => Err(err),
         }
     }
@@ -417,7 +416,7 @@ impl LocalNode {
     where
         P: Protocol<Handshake = S, Heartbeat = H> + 'static,
         S: HandshakePacket + 'static,
-        H: DeserializeOwned + Serialize + 'static,
+        H: DeserializeOwned + Serialize + Send + Sync + 'static,
     {
         Ok(LocalNode {
             inner: Arc::new(LocalNodeInner::new(cfg, tls, protocol)?),
@@ -449,7 +448,7 @@ pub fn create_local_node<S, H, P>(
 where
     P: Protocol<Handshake = S, Heartbeat = H> + 'static,
     S: HandshakePacket + 'static,
-    H: DeserializeOwned + Serialize + 'static,
+    H: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
     LocalNode::new(tls, cfg, protocol)
 }
