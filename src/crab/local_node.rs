@@ -1,4 +1,4 @@
-use super::{Node, utils};
+use super::{utils, Node};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,12 +7,13 @@ use super::utils::runit::Worker;
 
 use super::node::NodeStatus;
 use super::remote_node::RemoteNode;
-use super::{CrabError, utils::crypto::TLSProvider};
-use crate::crab::proto::{Hook, ProtoWrapper, Protocol};
+use super::{utils::crypto::TLSProvider, CrabError};
+use crate::crab::proto::{HandshakePacket, HandshakeRet, Hook, ProtoWrapper, Protocol};
 use quinn::crypto::rustls::QuicClientConfig;
-use quinn::{ClientConfig, ConnectError, Connecting};
-use quinn::{Endpoint, ServerConfig, crypto::rustls::QuicServerConfig};
-use serde::Deserialize;
+use quinn::{crypto::rustls::QuicServerConfig, Endpoint, ServerConfig};
+use quinn::{ClientConfig, Connecting};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::time::timeout;
 use tokio::{sync::mpsc, task::JoinSet, time};
@@ -64,8 +65,8 @@ impl LocalNodeInner {
     ) -> Result<LocalNodeInner, CrabError>
     where
         P: Protocol<Handshake = S, Heartbeat = H> + 'static,
-        S: 'static,
-        H: 'static,
+        S: HandshakePacket + 'static,
+        H: DeserializeOwned + Serialize + 'static,
     {
         let server_config = ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(tls.build_server_config()?).map_err(|err| {
@@ -109,52 +110,42 @@ impl LocalNodeInner {
     }
     async fn handshake(
         self: Arc<Self>,
-        conn: quinn::Connection,
-        cancel: CancellationToken,
+        conn: &quinn::Connection,
         as_client: bool,
-    ) -> Result<RemoteNode, CrabError> {
-        let self_clone = Arc::clone(&self);
-        let handshake_timeout = Duration::from_secs(self.cfg.options.handshake_timeout);
-        let handshake_ret = tokio::select! {
-            handshake_ret=async { if as_client {self_clone.hook.handshake_as_client(&conn).await} else {self_clone.hook.handshake(&conn).await} }=>{
-                 handshake_ret
-            },
-            _=cancel.cancelled()=>{
-                Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
-            }
-            _=time::sleep(handshake_timeout) => {
-                 Err(CrabError::ErrorCode(CrabError::HANDSHAKE_TIMEOUT))
-            }
-        };
-        match handshake_ret {
-            Ok(ret) => {
-                log::info!("handshake complete node id:{}", ret.node_id);
-                Ok(RemoteNode::new(&ret, conn))
-            }
-            Err(err) => {
-                log::warn!("handshake error {}", err);
-                Err(err)
-            }
+    ) -> Result<HandshakeRet, CrabError> {
+        if as_client {
+            log::debug!("handshake with connection from {}", conn.remote_address());
+            self.hook.handshake_as_client(&conn).await
+        } else {
+            log::debug!(
+                "handshake with connection from {} as client",
+                conn.remote_address()
+            );
+            self.hook.handshake(conn).await
         }
     }
     async fn handshake_with_timeout(
         self: Arc<Self>,
         conn: quinn::Connection,
         cancel: CancellationToken,
+        as_client: bool,
     ) -> Result<RemoteNode, CrabError> {
         let remote_addr = conn.remote_address();
         log::debug!("handshake with timeout remote address {}", remote_addr);
         let timeout = Duration::from_secs(self.cfg.options.handshake_timeout);
-        tokio::select! {
-            res=self.handshake(conn, cancel,false) => {
-                res.map_err(|e|{
-                    log::warn!("handshake error {} remote address {}", &e, remote_addr);
-                    e
-                })
-            }
+        let self_clone = self.clone();
+        match tokio::select! {
+            res=self_clone.handshake(&conn,as_client ) => res,
             _=time::sleep(timeout) => {
+                log::debug!("handshake with timeout request {:?}", timeout);
                 Err(CrabError::ErrorCode(CrabError::HANDSHAKE_TIMEOUT))
             }
+            _=cancel.cancelled() => {
+                Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
+            }
+        } {
+            Ok(ret) => Ok(RemoteNode::new(&ret, conn, as_client, self.hook.clone())),
+            Err(err) => Err(err),
         }
     }
     async fn listen(
@@ -172,7 +163,7 @@ impl LocalNodeInner {
                             let cancel_clone=cancel.clone();
                             join_set.spawn(async move   {
                                 match incoming.await{
-                                    Ok(conn)=>self_clone.handshake_with_timeout(conn, cancel_clone).await,
+                                    Ok(conn)=>self_clone.handshake_with_timeout(conn, cancel_clone,false).await,
                                     Err(err)=>{
                                         log::warn!("quic connection handshake error {}",err);
                                         Err(CrabError::ErrorCode(CrabError::HANDSHAKE_ERROR))
@@ -186,7 +177,7 @@ impl LocalNodeInner {
                         },
                     }
                 }
-                handshake_ret=join_set.join_next()=>{
+                handshake_ret=join_set.join_next(),if !join_set.is_empty()=>{
                     if let Some(Ok(Ok(node)))=handshake_ret{
                        let _= tx.send(node).await.inspect_err(|e|{
                             log::error!("send remote node error {}",e);
@@ -222,7 +213,7 @@ impl LocalNodeInner {
                         None=>break,
                     }
                 }
-                Some(Err(err))=join_set.join_next()=>{
+                Some(Err(err))=join_set.join_next(),if !join_set.is_empty()=>{
                     log::error!("serve all node join error {}",err);
                 }
             }
@@ -293,7 +284,7 @@ impl LocalNodeInner {
         cancel: CancellationToken,
     ) -> Result<(), CrabError> {
         log::info!("connect to remote node {}", remote_addr);
-        let retry_delay = Duration::from_secs(10);
+        let retry_delay = Self::REMOTE_CONNECT_RETRY_DELAY;
         while !cancel.is_cancelled() {
             tokio::select! {
                 _=time::sleep(retry_delay)=>{}
@@ -335,7 +326,7 @@ impl LocalNodeInner {
         let handshake_timeout = Duration::from_secs(self.cfg.options.handshake_timeout);
         for addr in address_list {
             log::info!("connect to remote node {} {}", host, addr);
-            let conn_fut = match self.endpoint.connect(addr, host) {
+            let conn_fut = match self.clone().endpoint.connect(addr, host) {
                 Ok(c) => c,
                 Err(e) => {
                     log::warn!("failed to init connection {} {}", host, addr);
@@ -358,8 +349,14 @@ impl LocalNodeInner {
                     continue;
                 }
             };
-            match self.clone().handshake(conn, cancel.clone(), true).await {
-                Ok(_) => {}
+            match self
+                .clone()
+                .handshake_with_timeout(conn, cancel.clone(), true)
+                .await
+            {
+                Ok(node) => {
+                    return Ok(node);
+                }
                 Err(e) => {
                     log::warn!("handshake error {} host:{} remote addr:{}", e, host, addr);
                     continue;
@@ -419,8 +416,8 @@ impl LocalNode {
     ) -> Result<Self, CrabError>
     where
         P: Protocol<Handshake = S, Heartbeat = H> + 'static,
-        H: 'static,
-        S: 'static,
+        S: HandshakePacket + 'static,
+        H: DeserializeOwned + Serialize + 'static,
     {
         Ok(LocalNode {
             inner: Arc::new(LocalNodeInner::new(cfg, tls, protocol)?),
@@ -435,10 +432,10 @@ impl Worker for LocalNode {
 }
 impl Node for LocalNode {
     fn id(&self) -> &str {
-        return &self.inner.cfg.node_id;
+        &self.inner.cfg.node_id
     }
     fn status(&self) -> NodeStatus {
-        return *self.inner.status_rx.borrow();
+        *self.inner.status_rx.borrow()
     }
     fn addr(&self) -> SocketAddr {
         self.inner.local_addr.clone()
@@ -451,8 +448,8 @@ pub fn create_local_node<S, H, P>(
 ) -> Result<impl Node, CrabError>
 where
     P: Protocol<Handshake = S, Heartbeat = H> + 'static,
-    H: 'static,
-    S: 'static,
+    S: HandshakePacket + 'static,
+    H: DeserializeOwned + Serialize + 'static,
 {
     LocalNode::new(tls, cfg, protocol)
 }

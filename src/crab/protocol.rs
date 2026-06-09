@@ -23,10 +23,12 @@ impl Protocol for SimpleProtocol {
     type Heartbeat = HandshakePayload;
 
     fn make_handshake(&self) -> Result<Self::Handshake, CrabError> {
-        todo!()
+        Ok(HandshakePayload {
+            node_id: "1234".to_string(),
+        })
     }
 
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError> {
-        todo!()
+        Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
 }

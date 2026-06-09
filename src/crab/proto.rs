@@ -1,11 +1,14 @@
 use crate::crab::{CrabError, Node};
 use bincode_next::config;
-use bincode_next::serde::decode_from_slice;
+use bincode_next::serde::{decode_from_slice, encode_into_std_write};
 use binrw::{BinRead, BinWrite, binrw};
-use serde::{Serialize, de::DeserializeOwned};
+use bytes::BufMut;
+use quinn::{Connection, RecvStream, SendStream};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{io::Cursor, marker::PhantomData};
 use tokio_util::bytes::{Buf, BytesMut};
 use tokio_util::codec::Decoder;
+
 #[derive(BinRead, BinWrite, Debug, PartialEq, Eq, Clone, Copy)]
 #[brw(repr = u16)]
 #[brw(little)]
@@ -18,16 +21,43 @@ pub enum Method {
 #[binrw]
 #[brw(little)]
 #[brw(magic = b"CRAB")]
+#[derive(Debug)]
 pub struct MessageHeader {
-    #[br(default)]
     pub version: u8,
     pub option: u8,
     pub method: Method,
     pub length: u32,
 }
+impl MessageHeader {
+    pub const OPTION_ERROR: u8 = 1 << 0;
+    pub fn ok(&self) -> bool {
+        self.option & Self::OPTION_ERROR != Self::OPTION_ERROR
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct AckMessage {
+    pub code: u32,
+    pub msg: Option<String>,
+}
+impl AckMessage {
+    pub fn from_error(err: &CrabError) -> Self {
+        match err {
+            CrabError::ErrorCode(code) => Self {
+                code: *code,
+                msg: None,
+            },
+            _ => Self {
+                code: CrabError::UNKNOWN_ERROR,
+                msg: Some(err.to_string()),
+            },
+        }
+    }
+}
+
 pub struct MessageCodec<T>(PhantomData<T>);
 const HEADER_SIZE: usize = 12;
-
+const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 impl<T> Decoder for MessageCodec<T>
 where
     T: DeserializeOwned,
@@ -53,7 +83,7 @@ where
         b.advance(HEADER_SIZE);
         let (ret, read_bytes): (T, usize) = decode_from_slice(&b, config::standard())
             .map_err(|_| CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE))?;
-        src.advance(HEADER_SIZE + read_bytes);
+        src.advance(read_bytes);
         Ok(Some((header, ret)))
     }
 }
@@ -62,7 +92,7 @@ pub struct HandshakeRet {
     pub node_id: String,
 }
 
-pub trait HandshakePacket: DeserializeOwned {
+pub trait HandshakePacket: DeserializeOwned + Serialize + Send + Sync {
     fn node_id(&self) -> &str;
 }
 pub trait Protocol: Send + Sync {
@@ -70,10 +100,8 @@ pub trait Protocol: Send + Sync {
     type Heartbeat: DeserializeOwned + Serialize + 'static;
     fn make_handshake(&self) -> Result<Self::Handshake, CrabError>;
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError>;
-    fn on_handshake(&self, packet: &Self::Handshake) -> Result<HandshakeRet, CrabError> {
-        Ok(HandshakeRet {
-            node_id: packet.node_id().to_string(),
-        })
+    fn on_handshake(&self, _: &Self::Handshake) -> Result<Self::Handshake, CrabError> {
+        self.make_handshake()
     }
     fn on_heartbeat(
         &self,
@@ -83,13 +111,82 @@ pub trait Protocol: Send + Sync {
         self.make_heartbeat()
     }
 }
+pub struct Stream {
+    pub writer: SendStream,
+    pub reader: RecvStream,
+}
+impl Stream {
+    const DEFAULT_BUF_SIZE: usize = 16 * 1024;
+    pub async fn read_message<T: DeserializeOwned>(
+        &mut self,
+    ) -> Result<(MessageHeader, T), CrabError> {
+        let mut header = [0u8; HEADER_SIZE];
+        self.reader.read_exact(&mut header[..]).await?;
+        let msg_header = MessageHeader::read(&mut Cursor::new(&header))
+            .map_err(|_| CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE))?;
+        if msg_header.length as usize > MAX_PAYLOAD_SIZE {
+            return Err(CrabError::ErrorCode(CrabError::PAYLOAD_TOO_LARGE));
+        }
+        let mut buf = BytesMut::with_capacity(msg_header.length as usize);
+        buf.resize(msg_header.length as usize, 0);
+        self.reader.read_exact(&mut buf[..]).await?;
+        if !msg_header.ok() {
+            let (msg, _): (AckMessage, usize) = decode_from_slice(&buf[..], config::standard())
+                .map_err(|e| CrabError::ErrorCode(CrabError::DESERIALIZATION_ERROR))?;
+            Err(CrabError::ErrorCode(msg.code))
+        } else {
+            let (message, _) = decode_from_slice(&buf[..], config::standard())
+                .map_err(|e| CrabError::ErrorCode(CrabError::DESERIALIZATION_ERROR))?;
+            Ok((msg_header, message))
+        }
+    }
+    pub async fn write_message<T: Serialize>(
+        &mut self,
+        method: Method,
+        option: u8,
+        msg: &T,
+    ) -> Result<(), CrabError> {
+        let mut buf = BytesMut::with_capacity(Self::DEFAULT_BUF_SIZE);
+        buf.resize(HEADER_SIZE, 0);
+        let mut writer = (&mut buf).writer();
+        encode_into_std_write(msg, &mut writer, config::standard())
+            .map_err(|_| CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE))?;
+        let payload_len = buf.len() - HEADER_SIZE;
+        let header = MessageHeader {
+            version: 0,
+            option,
+            method,
+            length: payload_len as u32,
+        };
+        header.write(&mut Cursor::new(&mut buf[..HEADER_SIZE]))?;
+        self.writer.write_all(buf.as_ref()).await?;
+        Ok(())
+    }
+    pub async fn write_error(
+        &mut self,
+        method: Method,
+        option: u8,
+        error: &CrabError,
+    ) -> Result<(), CrabError> {
+        let msg = AckMessage::from_error(error);
+        self.write_message(method, option, &msg).await
+    }
+    pub async fn accept_from_connection(conn: &Connection) -> Result<Self, CrabError> {
+        let (writer, reader) = conn.accept_bi().await?;
+        Ok(Self { writer, reader })
+    }
+    pub async fn open_from_connection(conn: &Connection) -> Result<Self, CrabError> {
+        let (writer, reader) = conn.open_bi().await?;
+        Ok(Self { writer, reader })
+    }
+}
 
 #[async_trait::async_trait]
 pub(super) trait Hook: Send + Sync {
-    async fn handshake(&self, _: &quinn::Connection) -> Result<HandshakeRet, CrabError> {
+    async fn handshake(&self, _: &Connection) -> Result<HandshakeRet, CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
-    async fn handshake_as_client(&self, _: &quinn::Connection) -> Result<HandshakeRet, CrabError> {
+    async fn handshake_as_client(&self, _: &Connection) -> Result<HandshakeRet, CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
 }
@@ -104,4 +201,71 @@ where
         Self { protocol }
     }
 }
-impl<S, H, P> Hook for ProtoWrapper<S, H, P> where P: Protocol<Handshake = S, Heartbeat = H> {}
+#[async_trait::async_trait]
+impl<S, H, P> Hook for ProtoWrapper<S, H, P>
+where
+    P: Protocol<Handshake = S, Heartbeat = H>,
+    S: HandshakePacket + 'static,
+    H: DeserializeOwned + Serialize + 'static,
+{
+    async fn handshake(&self, conn: &Connection) -> Result<HandshakeRet, CrabError> {
+        log::debug!("handshake with connection from {}", conn.remote_address());
+        let mut session = Stream::accept_from_connection(conn).await?;
+        let (header, handshake) = session.read_message::<P::Handshake>().await.map_err(|e| {
+            log::warn!("handshake failed,read header {:?}", e);
+            e
+        })?;
+        log::debug!(
+            "receive handshake message header,payload length {}",
+            header.length
+        );
+        if header.method != Method::Handshake {
+            log::warn!(
+                "invalid message method,accept {:?} receive {:?} ",
+                Method::Handshake,
+                header.method
+            );
+            return Err(CrabError::ErrorCode(CrabError::BAD_MESSAGE_HEADER));
+        }
+        match self.protocol.on_handshake(&handshake) {
+            Err(err) => {
+                session
+                    .write_error(Method::Handshake, MessageHeader::OPTION_ERROR, &err)
+                    .await?;
+                Err(err)
+            }
+            Ok(ret) => {
+                if let Err(err) = session
+                    .write_message(Method::Handshake, header.option, &ret)
+                    .await
+                {
+                    Err(CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE))
+                } else {
+                    Ok(HandshakeRet {
+                        node_id: ret.node_id().to_string(),
+                    })
+                }
+            }
+        }
+    }
+    async fn handshake_as_client(&self, conn: &Connection) -> Result<HandshakeRet, CrabError> {
+        log::debug!(
+            "handshake_as_client with connection {}",
+            conn.remote_address()
+        );
+        let handshake = self.protocol.make_handshake()?;
+        let mut session = Stream::open_from_connection(conn).await?;
+        session
+            .write_message(Method::Handshake, 0, &handshake)
+            .await?;
+        let (_, body) = session.read_message::<P::Handshake>().await?;
+        log::debug!(
+            "remote {} node id {}",
+            conn.remote_address(),
+            body.node_id()
+        );
+        Ok(HandshakeRet {
+            node_id: body.node_id().to_string(),
+        })
+    }
+}

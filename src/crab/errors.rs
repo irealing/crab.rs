@@ -6,6 +6,10 @@ pub enum CrabError {
     TLS(#[from] rustls::Error),
     IO(#[from] std::io::Error),
     TLSVerifier(#[from] VerifierBuilderError),
+    QuicConnectionError(#[from] quinn::ConnectionError),
+    QuicReadExactError(#[from] quinn::ReadExactError),
+    QuicWriteError(#[from] quinn::WriteError),
+    EncodeError(#[from] binrw::error::Error),
     ErrorCode(u32),
 }
 
@@ -25,6 +29,9 @@ impl CrabError {
     pub const CONNECT_ERROR: u32 = 12;
     pub const HANDSHAKE_TIMEOUT: u32 = 13;
     pub const CANCELED_ERROR: u32 = 14;
+    pub const PAYLOAD_TOO_LARGE: u32 = 15;
+    pub const BAD_MESSAGE_HEADER: u32 = 16;
+    pub const DESERIALIZATION_ERROR: u32 = 17;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
 
     fn error_message(&self) -> &'static str {
@@ -45,6 +52,9 @@ impl CrabError {
                 Self::CONNECT_ERROR => "Connection error",
                 Self::HANDSHAKE_TIMEOUT => "Handshake timeout",
                 Self::CANCELED_ERROR => "Canceled error",
+                Self::PAYLOAD_TOO_LARGE => "Payload too large",
+                Self::BAD_MESSAGE_HEADER => "Bad message header",
+                Self::DESERIALIZATION_ERROR => "Deserialization error",
                 _ => "Unknown error code",
             },
             _ => "",
@@ -56,9 +66,13 @@ impl std::fmt::Display for CrabError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ErrorCode(code) => write!(f, "Error code {}: {}", code, self.error_message()),
-            Self::TLS(e) => write!(f, "TLS error {}", e),
-            Self::IO(e) => write!(f, "IO Error {}", e),
-            Self::TLSVerifier(e) => write!(f, "TLS verifier error {}", e),
+            Self::TLS(e) => e.fmt(f),
+            Self::IO(e) => e.fmt(f),
+            Self::TLSVerifier(e) => e.fmt(f),
+            Self::QuicConnectionError(e) => e.fmt(f),
+            Self::QuicReadExactError(e) => e.fmt(f),
+            Self::QuicWriteError(e) => e.fmt(f),
+            Self::EncodeError(e) => e.fmt(f),
         }
     }
 }

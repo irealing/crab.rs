@@ -5,7 +5,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::utils::runit::Worker;
-use crate::crab::proto::HandshakeRet;
+use crate::crab::proto::{HandshakeRet, Hook};
 use crate::crab::{CrabError, Node, node::NodeStatus};
 
 struct RemoteNodeInner {
@@ -14,22 +14,29 @@ struct RemoteNodeInner {
     local_addr: SocketAddr,
     status_tx: watch::Sender<NodeStatus>,
     status_rx: watch::Receiver<NodeStatus>,
-    client: bool,
+    as_client: bool,
+    hook: Arc<dyn Hook>,
 }
 pub(super) struct RemoteNode {
     inner: Arc<RemoteNodeInner>,
 }
 impl RemoteNode {
-    pub(super) fn new(ret: &HandshakeRet, conn: quinn::Connection) -> Self {
+    pub(super) fn new(
+        ret: &HandshakeRet,
+        conn: quinn::Connection,
+        as_client: bool,
+        hook: Arc<dyn Hook>,
+    ) -> Self {
         let (status_tx, status_rx) = watch::channel(NodeStatus::Ready);
         Self {
             inner: Arc::new(RemoteNodeInner {
                 node_id: ret.node_id.clone(),
                 local_addr: conn.remote_address(),
-                conn: conn,
-                status_tx: status_tx,
-                status_rx: status_rx,
-                client: false,
+                conn,
+                status_tx,
+                status_rx,
+                as_client,
+                hook,
             }),
         }
     }
@@ -42,7 +49,7 @@ impl Worker for RemoteNode {
 }
 impl Node for RemoteNode {
     fn id(&self) -> &str {
-        return &self.inner.node_id;
+        &self.inner.node_id
     }
     fn status(&self) -> NodeStatus {
         *self.inner.status_rx.borrow()

@@ -1,7 +1,5 @@
-use crate::crab::{CrabError, utils::runit::Worker};
-use quinn::Connection;
+use crate::crab::utils::runit::Worker;
 use std::net::SocketAddr;
-use std::sync::Arc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeStatus {
     Ready,

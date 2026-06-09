@@ -1,7 +1,7 @@
 mod errors;
 mod local_node;
 mod node;
-mod proto;
+pub mod proto;
 pub mod protocol;
 mod remote_node;
 mod remote_node_handle;
