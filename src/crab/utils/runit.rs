@@ -65,6 +65,7 @@ impl Worker for WaitExitWorker {
         wait_exit(token).await
     }
 }
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;

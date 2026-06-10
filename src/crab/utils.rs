@@ -11,6 +11,7 @@ pub async fn parse_remote_addr(addr: &str) -> Result<(&str, Vec<SocketAddr>), Cr
     let addr = lookup_host(addr).await?;
     Ok((host, addr.collect::<Vec<SocketAddr>>()))
 }
+#[cfg(test)]
 mod tests {
     use super::*;
     #[tokio::test]

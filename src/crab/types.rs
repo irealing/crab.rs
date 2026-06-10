@@ -17,8 +17,13 @@ pub struct Options {
     pub heartbeat_interval: u64,
     pub heartbeat_timeout: u64,
 }
-pub trait Node: Worker {
+pub trait Endpoint: Worker {
+    fn id(&self) -> &str;
+    fn addr(&self) -> SocketAddr;
+}
+pub trait Node: Send + Sync {
     fn id(&self) -> &str;
     fn status(&self) -> NodeStatus;
     fn addr(&self) -> SocketAddr;
+    fn as_client(&self) -> bool;
 }

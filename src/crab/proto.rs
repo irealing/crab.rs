@@ -101,7 +101,7 @@ impl Stream {
         self.reader.read_exact(&mut buf[..]).await?;
         if !msg_header.ok() {
             let (msg, _): (AckMessage, usize) = decode_from_slice(&buf[..], config::standard())
-                .map_err(|e| CrabError::ErrorCode(CrabError::DESERIALIZATION_ERROR))?;
+                .map_err(|_| CrabError::ErrorCode(CrabError::DESERIALIZATION_ERROR))?;
             Err(CrabError::ErrorCode(msg.code))
         } else {
             let (message, _) = decode_from_slice(&buf[..], config::standard())
@@ -140,11 +140,11 @@ impl Stream {
         let msg = AckMessage::from_error(error);
         self.write_message(method, option, &msg).await
     }
-    pub async fn accept_from_connection(conn: &Connection) -> Result<Self, CrabError> {
+    pub async fn accept(conn: &Connection) -> Result<Self, CrabError> {
         let (writer, reader) = conn.accept_bi().await?;
         Ok(Self { writer, reader })
     }
-    pub async fn open_from_connection(conn: &Connection) -> Result<Self, CrabError> {
+    pub async fn open(conn: &Connection) -> Result<Self, CrabError> {
         let (writer, reader) = conn.open_bi().await?;
         Ok(Self { writer, reader })
     }
@@ -184,16 +184,12 @@ where
     H: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
     async fn handshake(&self, conn: &Connection) -> Result<HandshakeRet, CrabError> {
-        log::debug!("handshake with connection from {}", conn.remote_address());
-        let mut session = Stream::accept_from_connection(conn).await?;
+        log::trace!("handshake with connection from {}", conn.remote_address());
+        let mut session = Stream::accept(conn).await?;
         let (header, handshake) = session.read_message::<P::Handshake>().await.map_err(|e| {
             log::warn!("handshake failed,read header {:?}", e);
             e
         })?;
-        log::debug!(
-            "receive handshake message header,payload length {}",
-            header.length
-        );
         if header.method != Method::Handshake {
             log::warn!(
                 "invalid message method,accept {:?} receive {:?} ",
@@ -224,17 +220,17 @@ where
         }
     }
     async fn handshake_as_client(&self, conn: &Connection) -> Result<HandshakeRet, CrabError> {
-        log::debug!(
+        log::trace!(
             "handshake_as_client with connection {}",
             conn.remote_address()
         );
         let handshake = self.protocol.make_handshake()?;
-        let mut session = Stream::open_from_connection(conn).await?;
+        let mut session = Stream::open(conn).await?;
         session
             .write_message(Method::Handshake, 0, &handshake)
             .await?;
         let (_, body) = session.read_message::<P::Handshake>().await?;
-        log::debug!(
+        log::trace!(
             "remote {} node id {}",
             conn.remote_address(),
             body.node_id()

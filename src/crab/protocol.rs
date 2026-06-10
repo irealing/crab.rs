@@ -29,6 +29,8 @@ impl Protocol for SimpleProtocol {
     }
 
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError> {
-        Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
+        Ok(HandshakePayload {
+            node_id: "1234".to_string(),
+        })
     }
 }

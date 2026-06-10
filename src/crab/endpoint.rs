@@ -5,22 +5,21 @@ use std::time::Duration;
 
 use super::utils::runit::Worker;
 
-use super::node::{NodeStatus, Options};
+use super::types::{Endpoint, Options};
 use super::remote_node::RemoteNode;
 use super::{CrabError, utils::crypto::TLSProvider};
 use crate::crab::proto::{HandshakePacket, HandshakeRet, Hook, ProtoWrapper, Protocol};
 use quinn::ClientConfig;
 use quinn::crypto::rustls::QuicClientConfig;
-use quinn::{Endpoint, ServerConfig, crypto::rustls::QuicServerConfig};
+use quinn::{ServerConfig, crypto::rustls::QuicServerConfig};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
 use tokio::time::timeout;
 use tokio::{sync::mpsc, task::JoinSet, time};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Debug)]
-pub struct LocalNodeConfig {
+pub struct EndpointConfig {
     pub bind_address: String,
     pub node_id: String,
     #[serde(default)]
@@ -41,21 +40,19 @@ impl Default for Options {
         }
     }
 }
-struct LocalNodeInner {
-    cfg: LocalNodeConfig,
-    endpoint: Endpoint,
-    status_tx: watch::Sender<NodeStatus>,
-    status_rx: watch::Receiver<NodeStatus>,
+struct LocalEndpointInner {
+    cfg: EndpointConfig,
+    endpoint: quinn::Endpoint,
     local_addr: SocketAddr,
     hook: Arc<dyn Hook>,
 }
-impl LocalNodeInner {
+impl LocalEndpointInner {
     const REMOTE_CONNECT_RETRY_DELAY: Duration = Duration::from_secs(10);
     fn new<S, H, P>(
-        cfg: LocalNodeConfig,
+        cfg: EndpointConfig,
         tls: TLSProvider,
         protocol: P,
-    ) -> Result<LocalNodeInner, CrabError>
+    ) -> Result<LocalEndpointInner, CrabError>
     where
         P: Protocol<Handshake = S, Heartbeat = H> + 'static,
         S: HandshakePacket + 'static,
@@ -74,7 +71,7 @@ impl LocalNodeInner {
                 CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
             })?,
         ));
-        let endpoint = Endpoint::server(
+        let endpoint = quinn::Endpoint::server(
             server_config,
             cfg.bind_address.parse().map_err(|e| {
                 log::error!("parse listen addr error {}", e);
@@ -90,13 +87,10 @@ impl LocalNodeInner {
             e.set_default_client_config(client_config);
             e
         })?;
-        let (status_tx, status_rx) = watch::channel(NodeStatus::Ready);
         let local_addr = endpoint.local_addr()?;
-        Ok(LocalNodeInner {
+        Ok(LocalEndpointInner {
             cfg,
             endpoint,
-            status_tx,
-            status_rx,
             local_addr,
             hook: Arc::new(ProtoWrapper::new(protocol)),
         })
@@ -184,7 +178,6 @@ impl LocalNodeInner {
                     }
                 }
                 _=cancel.cancelled()=>{
-                    self.set_status(NodeStatus::Stopping);
                     break;
                 }
             }
@@ -372,9 +365,6 @@ impl LocalNodeInner {
         let (accept_cancel, serve_cancel) = (cancel.clone(), cancel.clone());
         join_set.spawn(async move { self_accept.listen(accept_cancel, tx).await });
         join_set.spawn(async move { self_serve.serve_all_node(serve_cancel, rx).await });
-        self.status_tx
-            .send(NodeStatus::Running)
-            .expect("send should never fail");
         let mut r = None;
         while let Some(ret) = join_set.join_next().await {
             match ret {
@@ -387,30 +377,18 @@ impl LocalNodeInner {
                 }
                 _ => continue,
             }
-            self.set_status(NodeStatus::Stopping);
         }
-        self.set_status(NodeStatus::Stopped);
         if let Some(err) = r { Err(err) } else { Ok(()) }
-    }
-    fn set_status(&self, status: NodeStatus) {
-        self.status_tx.send_if_modified(|val| {
-            if *val != status {
-                *val = status.clone();
-                true
-            } else {
-                false
-            }
-        });
     }
 }
 
-struct LocalNode {
-    inner: Arc<LocalNodeInner>,
+struct LocalEndpoint {
+    inner: Arc<LocalEndpointInner>,
 }
-impl LocalNode {
+impl LocalEndpoint {
     pub fn new<S, H, P>(
         tls: TLSProvider,
-        cfg: LocalNodeConfig,
+        cfg: EndpointConfig,
         protocol: P,
     ) -> Result<Self, CrabError>
     where
@@ -418,37 +396,34 @@ impl LocalNode {
         S: HandshakePacket + 'static,
         H: DeserializeOwned + Serialize + Send + Sync + 'static,
     {
-        Ok(LocalNode {
-            inner: Arc::new(LocalNodeInner::new(cfg, tls, protocol)?),
+        Ok(LocalEndpoint {
+            inner: Arc::new(LocalEndpointInner::new(cfg, tls, protocol)?),
         })
     }
 }
 #[async_trait::async_trait]
-impl Worker for LocalNode {
+impl Worker for LocalEndpoint {
     async fn serve(&self, cancel: CancellationToken) -> Result<(), CrabError> {
         self.inner.clone().serve(cancel).await
     }
 }
-impl Node for LocalNode {
+impl Endpoint for LocalEndpoint {
     fn id(&self) -> &str {
         &self.inner.cfg.node_id
-    }
-    fn status(&self) -> NodeStatus {
-        *self.inner.status_rx.borrow()
     }
     fn addr(&self) -> SocketAddr {
         self.inner.local_addr.clone()
     }
 }
-pub fn create_local_node<S, H, P>(
+pub fn create_local_endpoint<S, H, P>(
     tls: TLSProvider,
-    cfg: LocalNodeConfig,
+    cfg: EndpointConfig,
     protocol: P,
-) -> Result<impl Node, CrabError>
+) -> Result<impl Endpoint, CrabError>
 where
     P: Protocol<Handshake = S, Heartbeat = H> + 'static,
     S: HandshakePacket + 'static,
     H: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
-    LocalNode::new(tls, cfg, protocol)
+    LocalEndpoint::new(tls, cfg, protocol)
 }

@@ -4,7 +4,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::crab::utils::crypto::TLSProvider;
 use crate::crab::{
-    CrabError, create_local_node, protocol,
+    CrabError, create_local_endpoint, protocol,
     utils::runit::{WaitExitWorker, Worker, worker_group},
 };
 
@@ -30,9 +30,9 @@ async fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 async fn start(cfg: config::Config) -> Result<(), CrabError> {
-    let local_node = Arc::new(create_local_node(
+    let local_node = Arc::new(create_local_endpoint(
         TLSProvider::from_config(cfg.tls),
-        cfg.node,
+        cfg.endpoint,
         protocol::SimpleProtocol::new(),
     )?);
     let workers: Vec<Arc<dyn Worker>> = vec![

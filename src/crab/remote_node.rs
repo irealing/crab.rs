@@ -2,13 +2,15 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
+use tokio::task::JoinSet;
 use tokio::time;
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 use super::utils::runit::Worker;
-use crate::crab::node::Options;
 use crate::crab::proto::{HandshakeRet, Hook, Stream};
-use crate::crab::{node::NodeStatus, CrabError, Node};
+use crate::crab::types::Options;
+use crate::crab::{CrabError, Node, types::NodeStatus};
 
 struct RemoteNodeInner {
     node_id: String,
@@ -21,44 +23,105 @@ struct RemoteNodeInner {
     opts: Options,
 }
 impl RemoteNodeInner {
-    pub async fn heartbeat(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
+    pub async fn serve(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
         let mut stream = if self.as_client {
-            Stream::open_from_connection(&self.conn).await
+            Stream::open(&self.conn).await
         } else {
-            Stream::accept_from_connection(&self.conn).await
+            Stream::accept(&self.conn).await
         }?;
-        let heartbeat_interval = Duration::from_secs(self.opts.heartbeat_interval);
-        let heartbeat_timeout = Duration::from_secs(self.opts.heartbeat_timeout);
-        let mut interval = time::interval(heartbeat_interval);
-        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
-        let self_clone = self.clone();
+        if let Err(err) = if self.as_client {
+            self.hook.heartbeat_as_client(&mut stream).await
+        } else {
+            self.hook.heartbeat(&mut stream).await
+        } {
+            log::error!("first heartbeat failed: {}", err);
+            return Err(err);
+        };
+        log::trace!("first heartbeat finished");
+        let cancel_clone = cancel.clone();
+        let cancel_child = cancel.child_token();
         loop {
             tokio::select! {
-
-                _ = cancel.cancelled() => {
-                    return Ok(());
+                _=cancel_clone.cancelled() => {
+                    break;
                 },
-                _ = interval.tick() =>{
+                hb_res=self.clone().make_heartbeat(&mut stream, cancel.clone().clone()) => {
+                    match hb_res {
+                        Ok(()) => {
+                            log::trace!("heartbeat success");
+                        }
+                        Err(err) => {
+                            cancel_child.cancel();
+                            return if let CrabError::ErrorCode(CrabError::CANCELED_ERROR) = err {
+                                log::trace!("heartbeat error with cancel");
+                                break;
+                            }else{
+                                log::error!("heartbeat failed: {}", err);
+                                Err(err)
+                            }
+                        }
+                    }
                 }
-            }
-            tokio::select! {
-                _=time::sleep(heartbeat_timeout) => {
-                    return Err(CrabError::ErrorCode(CrabError::HEARTBEAT_TIMEOUT));
-                }
-                _=cancel.cancelled() => {
-                    return Ok(())
-                }
-                Err(err)=self_clone.make_heartbeat(&mut stream)=>{
-                    return Err(err);
+                Ok(_)=Stream::accept(&self.conn)=>{
+                    log::trace!("accepted new stream");
                 }
             }
         }
+        Ok(())
     }
-    async fn make_heartbeat(self: Arc<Self>, stream: &mut Stream) -> Result<(), CrabError> {
+    async fn handle_stream(
+        cancel: CancellationToken,
+        stream: &mut Stream,
+    ) -> Result<(), CrabError> {
+        todo!()
+    }
+    async fn make_heartbeat(
+        self: Arc<Self>,
+        stream: &mut Stream,
+        cancel: CancellationToken,
+    ) -> Result<(), CrabError> {
         if self.as_client {
-            self.hook.heartbeat_as_client(stream).await
+            self.heartbeat_as_client(stream, cancel).await
         } else {
-            self.hook.heartbeat(stream).await
+            self.heartbeat_as_server(stream, cancel).await
+        }
+    }
+    async fn heartbeat_as_client(
+        self: Arc<Self>,
+        stream: &mut Stream,
+        cancel: CancellationToken,
+    ) -> Result<(), CrabError> {
+        tokio::select! {
+            _=time::sleep(Duration::from_secs(self.opts.heartbeat_interval)) =>{
+                self.hook.heartbeat_as_client(stream).await
+            }
+            _ = cancel.cancelled() => {
+                 Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
+            }
+        }
+    }
+    async fn heartbeat_as_server(
+        self: Arc<Self>,
+        stream: &mut Stream,
+        cancel: CancellationToken,
+    ) -> Result<(), CrabError> {
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
+            }
+            res=timeout(Duration::from_secs(self.opts.heartbeat_timeout), self.hook.heartbeat(stream))=>{
+               match res {
+                    Ok(Ok(_))=>{
+                        Ok(())
+                    }
+                    Ok(Err(err)) => {
+                        return Err(err);
+                    }
+                    Err(_)=>{
+                        Err(CrabError::ErrorCode(CrabError::HEARTBEAT_TIMEOUT))
+                    }
+                }
+            }
         }
     }
 }
@@ -91,7 +154,7 @@ impl RemoteNode {
 #[async_trait::async_trait]
 impl Worker for RemoteNode {
     async fn serve(&self, cancel: CancellationToken) -> Result<(), CrabError> {
-        self.inner.clone().heartbeat(cancel).await
+        self.inner.clone().serve(cancel).await
     }
 }
 impl Node for RemoteNode {
@@ -103,5 +166,8 @@ impl Node for RemoteNode {
     }
     fn addr(&self) -> SocketAddr {
         self.inner.local_addr
+    }
+    fn as_client(&self) -> bool {
+        self.inner.as_client
     }
 }
