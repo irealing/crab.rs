@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio::time;
@@ -25,10 +26,10 @@ struct RemoteNodeInner {
 impl RemoteNodeInner {
     pub async fn serve(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
         let mut stream = if self.as_client {
-            Stream::open(&self.conn).await
+            Stream::open(&self.conn).await?
         } else {
-            Stream::accept(&self.conn).await
-        }?;
+            Stream::accept(&self.conn).await?
+        };
         if let Err(err) = if self.as_client {
             self.hook.heartbeat_as_client(&mut stream).await
         } else {
@@ -38,38 +39,88 @@ impl RemoteNodeInner {
             return Err(err);
         };
         log::trace!("first heartbeat finished");
+        let (tx, rx) = mpsc::channel(32);
+        let self_hs = self.clone();
         let cancel_clone = cancel.clone();
         let cancel_child = cancel.child_token();
+        let cancel_child_clone = cancel_clone.clone();
+        let hs_handle =
+            tokio::spawn(async move { self_hs.handle_all_streams(cancel_child_clone, rx).await });
+
         loop {
+            let self_hb = self.clone();
             tokio::select! {
                 _=cancel_clone.cancelled() => {
                     break;
                 },
-                hb_res=self.clone().make_heartbeat(&mut stream, cancel.clone().clone()) => {
+                hb_res=self_hb.make_heartbeat(&mut stream, cancel.clone()) => {
                     match hb_res {
                         Ok(()) => {
                             log::trace!("heartbeat success");
                         }
                         Err(err) => {
                             cancel_child.cancel();
-                            return if let CrabError::ErrorCode(CrabError::CANCELED_ERROR) = err {
+                            if let CrabError::ErrorCode(CrabError::CANCELED_ERROR) = err {
                                 log::trace!("heartbeat error with cancel");
-                                break;
                             }else{
                                 log::error!("heartbeat failed: {}", err);
-                                Err(err)
                             }
+                            break;
                         }
                     }
                 }
-                Ok(_)=Stream::accept(&self.conn)=>{
+                Ok(stream)=Stream::accept(&self.conn)=>{
                     log::trace!("accepted new stream");
+                    if let Err(err)=tx.send(Some(stream)).await{
+                        log::error!("failed to send new stream: {}", err);
+                    }
                 }
+            }
+        }
+        let _ = tx.send(None).await;
+        hs_handle.await?
+    }
+    async fn handle_all_streams(
+        self: Arc<Self>,
+        cancel: CancellationToken,
+        mut rx: mpsc::Receiver<Option<Stream>>,
+    ) -> Result<(), CrabError> {
+        let mut join_set: JoinSet<Result<(), CrabError>> = JoinSet::new();
+        loop {
+            let self_clone = self.clone();
+            let cancel_clone = cancel.clone();
+            tokio::select! {
+                _=cancel.cancelled()=>{
+                    rx.close();
+                    break;
+                }
+                ret=rx.recv() => {
+                    match ret{
+                        None=>break,
+                        Some(None)=>break,
+                        Some(Some(mut stream))=> {
+                            join_set.spawn(async move {
+                                self_clone.handle_stream(cancel_clone,&mut stream).await
+                            });
+                        }
+                    }
+                }
+                Some(join_ret)=join_set.join_next(),if !join_set.is_empty() => {
+                    if let Err(err) = join_ret {
+                        log::error!("join set: {:?}", err);
+                    }
+                }
+            }
+        }
+        while let Some(join_ret) = join_set.join_next().await {
+            if let Err(err) = join_ret {
+                log::error!("handle all stream join error: {}", err);
             }
         }
         Ok(())
     }
     async fn handle_stream(
+        self: Arc<Self>,
         cancel: CancellationToken,
         stream: &mut Stream,
     ) -> Result<(), CrabError> {

@@ -10,6 +10,7 @@ pub enum CrabError {
     QuicReadExactError(#[from] quinn::ReadExactError),
     QuicWriteError(#[from] quinn::WriteError),
     EncodeError(#[from] binrw::error::Error),
+    JoinError(#[from] tokio::task::JoinError),
     ErrorCode(u32),
 }
 
@@ -75,6 +76,7 @@ impl std::fmt::Display for CrabError {
             Self::QuicReadExactError(e) => e.fmt(f),
             Self::QuicWriteError(e) => e.fmt(f),
             Self::EncodeError(e) => e.fmt(f),
+            Self::JoinError(e) => e.fmt(f),
         }
     }
 }
