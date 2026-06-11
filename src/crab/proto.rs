@@ -210,6 +210,7 @@ where
                     .write_message(Method::Handshake, header.option, &ret)
                     .await
                 {
+                    log::error!("write handshake message failed {:}", err);
                     Err(CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE))
                 } else {
                     Ok(HandshakeRet {

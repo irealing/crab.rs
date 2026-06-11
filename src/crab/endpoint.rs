@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use super::utils::runit::Worker;
 
-use super::remote_node::RemoteNode;
+use super::nodes::RemoteNode;
 use super::types::{Endpoint, Options};
 use super::{CrabError, utils::crypto::TLSProvider};
 use crate::crab::proto::{HandshakePacket, HandshakeRet, Hook, ProtoWrapper, Protocol};

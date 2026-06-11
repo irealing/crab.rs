@@ -30,7 +30,7 @@ impl Config {
     pub fn load_config_file(filename: &str) -> Self {
         match read_to_string(filename) {
             Ok(content) => toml::from_str(&content).unwrap_or_else(|err| {
-                log::warn!("desrialize config file {} error {}", filename, err);
+                log::warn!("deserialize config file {} error {}", filename, err);
                 Self::default()
             }),
             Err(err) => {

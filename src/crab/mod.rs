@@ -2,8 +2,8 @@ mod errors;
 mod endpoint;
 mod types;
 pub mod proto;
-mod remote_node;
-mod remote_node_handle;
+mod nodes;
+mod node_handle;
 pub mod utils;
 
 pub use errors::CrabError;
