@@ -2,7 +2,6 @@ mod errors;
 mod endpoint;
 mod types;
 pub mod proto;
-pub mod protocol;
 mod remote_node;
 mod remote_node_handle;
 pub mod utils;

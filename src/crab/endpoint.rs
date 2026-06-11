@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use super::utils::runit::Worker;
 
-use super::types::{Endpoint, Options};
 use super::remote_node::RemoteNode;
+use super::types::{Endpoint, Options};
 use super::{CrabError, utils::crypto::TLSProvider};
 use crate::crab::proto::{HandshakePacket, HandshakeRet, Hook, ProtoWrapper, Protocol};
 use quinn::ClientConfig;
@@ -315,13 +315,12 @@ impl LocalEndpointInner {
     ) -> Result<RemoteNode, CrabError> {
         let (host, address_list) = utils::parse_remote_addr(addr).await?;
         let connect_timeout = Duration::from_secs(self.cfg.options.connect_timeout);
-        let handshake_timeout = Duration::from_secs(self.cfg.options.handshake_timeout);
         for addr in address_list {
             log::info!("connect to remote node {} {}", host, addr);
             let conn_fut = match self.clone().endpoint.connect(addr, host) {
                 Ok(c) => c,
                 Err(e) => {
-                    log::warn!("failed to init connection {} {}", host, addr);
+                    log::warn!("failed to init connection host{}({}) {}", host, addr, e);
                     continue;
                 }
             };

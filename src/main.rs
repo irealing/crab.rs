@@ -1,15 +1,16 @@
+mod app;
+mod crab;
 use std::{process::ExitCode, sync::Arc};
 
 use tokio_util::sync::CancellationToken;
 
 use crate::crab::utils::crypto::TLSProvider;
 use crate::crab::{
-    CrabError, create_local_endpoint, protocol,
-    utils::runit::{WaitExitWorker, Worker, worker_group},
+    create_local_endpoint, utils::runit::{worker_group, WaitExitWorker, Worker},
+    CrabError,
 };
+use app::{config, protocol};
 
-mod config;
-mod crab;
 const DEFAULT_CONFIG_FILE: &str = "@config.toml";
 #[tokio::main]
 async fn main() -> ExitCode {

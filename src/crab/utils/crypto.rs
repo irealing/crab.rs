@@ -26,15 +26,7 @@ impl Config {
     const DEFAULT_PRIV_KEY: &str = "private.key";
     const DEFAULT_CERT: &str = "cert.pem";
     const DEFAULT_CONFIG_FILENAME: &str = "config.toml";
-    pub fn default() -> Config {
-        Self {
-            use_system_ca: true,
-            ca_path: None,
-            priv_key: Self::DEFAULT_PRIV_KEY.to_string(),
-            cert: Self::DEFAULT_CERT.to_string(),
-            verify_client: false,
-        }
-    }
+
     pub fn load_config_file(filename: &str) -> Self {
         match read_to_string(filename) {
             Ok(content) => toml::from_str(&content).unwrap_or_else(|err| {
@@ -51,13 +43,24 @@ impl Config {
         Self::load_config_file(Self::DEFAULT_CONFIG_FILENAME)
     }
 }
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            use_system_ca: true,
+            ca_path: None,
+            priv_key: Self::DEFAULT_PRIV_KEY.to_string(),
+            cert: Self::DEFAULT_CERT.to_string(),
+            verify_client: false,
+        }
+    }
+}
 pub struct TLSProvider {
     cfg: Config,
 }
 
 impl TLSProvider {
     pub fn from_config(cfg: Config) -> Self {
-        Self { cfg: cfg }
+        Self { cfg }
     }
     pub fn from_default_config_file() -> Self {
         Self::from_config(Config::load_default_config_file())
@@ -114,6 +117,7 @@ impl TLSProvider {
         }
     }
 }
+#[cfg(test)]
 mod tests {
     use super::TLSProvider;
 

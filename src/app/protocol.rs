@@ -18,6 +18,11 @@ impl SimpleProtocol {
         Self {}
     }
 }
+pub struct HostInfo {
+    pub host: String,
+    pub os_version: String,
+    pub os_build: String,
+}
 impl Protocol for SimpleProtocol {
     type Handshake = HandshakePayload;
     type Heartbeat = HandshakePayload;
