@@ -104,8 +104,10 @@ impl Stream {
                 .map_err(|_| CrabError::ErrorCode(CrabError::DESERIALIZATION_ERROR))?;
             Err(CrabError::ErrorCode(msg.code))
         } else {
-            let (message, _) = decode_from_slice(&buf[..], config::standard())
-                .map_err(|e| CrabError::ErrorCode(CrabError::DESERIALIZATION_ERROR))?;
+            let (message, _) = decode_from_slice(&buf[..], config::standard()).map_err(|e| {
+                log::warn!("Failed to decode message: {}", e);
+                CrabError::ErrorCode(CrabError::DESERIALIZATION_ERROR)
+            })?;
             Ok((msg_header, message))
         }
     }

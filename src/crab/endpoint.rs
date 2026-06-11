@@ -30,16 +30,6 @@ pub struct EndpointConfig {
     pub options: Options,
 }
 
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            connect_timeout: 10,
-            handshake_timeout: 10,
-            heartbeat_interval: 15,
-            heartbeat_timeout: 30,
-        }
-    }
-}
 struct LocalEndpointInner {
     cfg: EndpointConfig,
     endpoint: quinn::Endpoint,

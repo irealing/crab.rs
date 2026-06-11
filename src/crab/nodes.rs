@@ -1,3 +1,7 @@
+use super::proto::{HandshakeRet, Hook, Stream};
+use super::types::Options;
+use super::utils::runit::Worker;
+use super::{CrabError, Node, types::NodeStatus};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,11 +11,6 @@ use tokio::task::JoinSet;
 use tokio::time;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-
-use super::utils::runit::Worker;
-use crate::crab::proto::{HandshakeRet, Hook, Stream};
-use crate::crab::types::Options;
-use crate::crab::{CrabError, Node, types::NodeStatus};
 
 struct RemoteNodeInner {
     node_id: String,
@@ -37,53 +36,20 @@ impl RemoteNodeInner {
             log::info!("node {} status {}", self.node_id, status_ref);
         }
     }
-    pub async fn serve(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
-        let mut stream = if self.as_client {
-            Stream::open(&self.conn).await?
-        } else {
-            Stream::accept(&self.conn).await?
-        };
-        if let Err(err) = if self.as_client {
-            self.hook.heartbeat_as_client(&mut stream).await
-        } else {
-            self.hook.heartbeat(&mut stream).await
-        } {
-            log::error!("first heartbeat failed: {}", err);
-            return Err(err);
-        };
-        self.set_status(NodeStatus::Running);
-        log::trace!("first heartbeat finished");
+    async fn accept(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
         let (tx, rx) = mpsc::channel(32);
+        let cancel_c = cancel.child_token();
+        let cancel_hs = cancel_c.clone();
         let self_hs = self.clone();
-        let cancel_clone = cancel.clone();
-        let cancel_child = cancel.child_token();
-        let cancel_child_clone = cancel_clone.clone();
+        let self_clone = self.clone();
         let hs_handle =
-            tokio::spawn(async move { self_hs.handle_all_streams(cancel_child_clone, rx).await });
-
+            tokio::spawn(async move { self_hs.handle_all_streams(cancel_hs, rx).await });
         loop {
-            let self_hb = self.clone();
             tokio::select! {
-                _=cancel_clone.cancelled() => {
+                _=cancel.cancelled() => {
                     break;
-                },
-                hb_res=self_hb.make_heartbeat(&mut stream, cancel.clone()) => {
-                    match hb_res {
-                        Ok(()) => {
-                            log::trace!("heartbeat success");
-                        }
-                        Err(err) => {
-                            cancel_child.cancel();
-                            if let CrabError::ErrorCode(CrabError::CANCELED_ERROR) = err {
-                                log::trace!("heartbeat error with cancel");
-                            }else{
-                                log::error!("heartbeat failed: {}", err);
-                            }
-                            break;
-                        }
-                    }
                 }
-                Ok(stream)=Stream::accept(&self.conn)=>{
+                Ok(stream)=Stream::accept(&self_clone.conn)=>{
                     log::trace!("accepted new stream");
                     if let Err(err)=tx.send(Some(stream)).await{
                         log::error!("failed to send new stream: {}", err);
@@ -92,10 +58,7 @@ impl RemoteNodeInner {
             }
         }
         let _ = tx.send(None).await;
-        self.set_status(NodeStatus::Stopping);
-        let ret = hs_handle.await?;
-        self.set_status(NodeStatus::Stopped);
-        ret
+        hs_handle.await?
     }
     async fn handle_all_streams(
         self: Arc<Self>,
@@ -138,8 +101,8 @@ impl RemoteNodeInner {
     }
     async fn handle_stream(
         self: Arc<Self>,
-        cancel: CancellationToken,
-        stream: &mut Stream,
+        _: CancellationToken,
+        _: &mut Stream,
     ) -> Result<(), CrabError> {
         todo!()
     }
@@ -218,11 +181,71 @@ impl RemoteNode {
             }),
         }
     }
+    async fn make_first_heartbeat(&self, cancel: CancellationToken) -> Result<Stream, CrabError> {
+        let mut stream = if self.as_client() {
+            Stream::open(&self.inner.conn).await?
+        } else {
+            Stream::accept(&self.inner.conn).await?
+        };
+        if self.as_client() {
+            self.inner.hook.heartbeat_as_client(&mut stream).await?;
+        } else {
+            self.inner.hook.heartbeat(&mut stream).await?;
+        }
+        Ok(stream)
+    }
 }
 #[async_trait::async_trait]
 impl Worker for RemoteNode {
     async fn serve(&self, cancel: CancellationToken) -> Result<(), CrabError> {
-        self.inner.clone().serve(cancel).await
+        let mut hb_stream = timeout(
+            Duration::from_secs(self.inner.opts.first_heartbeat),
+            self.make_first_heartbeat(cancel.clone()),
+        )
+        .await
+        .map_err(|_| CrabError::ErrorCode(CrabError::HEARTBEAT_TIMEOUT))??;
+        log::trace!(
+            "node {}({}) first heartbeat finished",
+            self.inner.node_id,
+            self.inner.local_addr
+        );
+        self.inner.set_status(NodeStatus::Running);
+        let hb_cancel = cancel.clone();
+        let accept_cancel = cancel.clone();
+        let accept_cancel_clone = accept_cancel.clone();
+        let inner_hs = self.inner.clone();
+        let accept_handle = tokio::spawn(async move { inner_hs.accept(accept_cancel_clone).await });
+        loop {
+            let inner_hb = self.inner.clone();
+            if let Err(err) = tokio::select! {
+                _=cancel.cancelled() => {
+                    Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
+                }
+                hb_res=inner_hb.make_heartbeat(&mut hb_stream,hb_cancel.clone()) => {
+                    if let Err(err) = hb_res {
+                        Err(err)
+                    }else{
+                        log::trace!("node {}({}) heartbeat finished", self.inner.node_id, self.inner.local_addr);
+                        Ok(())
+                    }
+                }
+            } {
+                self.inner.set_status(NodeStatus::Stopping);
+                hb_cancel.cancel();
+                if !matches!(err, CrabError::ErrorCode(CrabError::CANCELED_ERROR)) {
+                    log::error!(
+                        "node {}({})  heartbeat error :{}",
+                        self.inner.node_id,
+                        self.inner.local_addr,
+                        err
+                    );
+                }
+                break;
+            }
+        }
+        let ret = accept_handle.await?;
+        self.inner.set_status(NodeStatus::Stopped);
+        ret
     }
 }
 impl Node for RemoteNode {
