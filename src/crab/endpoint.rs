@@ -198,9 +198,14 @@ impl LocalEndpointInner {
                     match msg{
                         Some(node)=>{
                             let cancel_copy = cancel.clone();
-                            join_set.spawn(async move{if let Err(err)=node.serve(cancel_copy).await{
-                                log::warn!("remote node {} serve error {}",node.id(),err);
-                            }});
+                            join_set.spawn(async move{
+                                log::info!("start remote node {}({})",node.id(),node.addr());
+                                if let Err(err)=node.serve(cancel_copy).await{
+                                    log::warn!("remote node {}({}) exit with error {}",node.id(),node.addr(),err);
+                                }else{
+                                    log::warn!("remote node {}({}) exit",node.id(),node.addr());
+                                }
+                            });
                         },
                         None=>break,
                     }
@@ -275,7 +280,7 @@ impl LocalEndpointInner {
         remote_addr: &str,
         cancel: CancellationToken,
     ) -> Result<(), CrabError> {
-        log::info!("connect to remote node {}", remote_addr);
+        log::info!("start remote node  addr: {}", remote_addr);
         let retry_delay = Self::REMOTE_CONNECT_RETRY_DELAY;
         while !cancel.is_cancelled() {
             tokio::select! {
@@ -285,7 +290,7 @@ impl LocalEndpointInner {
                     return Ok(());
                 }
             }
-            log::info!("connect to remote node {}", remote_addr);
+            log::debug!("try connect to remote node {}", remote_addr);
             let self_copy = self.clone();
             let cancel_copy = cancel.clone();
             let node = tokio::select! {
@@ -300,10 +305,16 @@ impl LocalEndpointInner {
                     return Ok(());
                 }
             };
+            log::info!("start remote node {}({})", node.id(), node.addr());
             if let Err(err) = node.serve(cancel_copy).await {
-                log::error!("remote node {} serve error {}", remote_addr, err);
+                log::error!(
+                    "remote node {}({}) exit with error {}",
+                    node.id(),
+                    node.addr(),
+                    err
+                );
             } else {
-                log::info!("remote node {} serve exit", remote_addr);
+                log::info!("remote node {}({}) exit", node.id(), node.addr());
             }
         }
         Ok(())
@@ -316,7 +327,7 @@ impl LocalEndpointInner {
         let (host, address_list) = utils::parse_remote_addr(addr).await?;
         let connect_timeout = Duration::from_secs(self.cfg.options.connect_timeout);
         for addr in address_list {
-            log::info!("connect to remote node {} {}", host, addr);
+            log::debug!("try connect to remote node {} {}", host, addr);
             let conn_fut = match self.clone().endpoint.connect(addr, host) {
                 Ok(c) => c,
                 Err(e) => {

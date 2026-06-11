@@ -24,6 +24,19 @@ struct RemoteNodeInner {
     opts: Options,
 }
 impl RemoteNodeInner {
+    fn set_status(&self, status: NodeStatus) {
+        let status_ref = &status;
+        if self.status_tx.send_if_modified(|v| {
+            return if *v != *status_ref {
+                *v = *status_ref;
+                true
+            } else {
+                false
+            };
+        }) {
+            log::info!("node {} status {}", self.node_id, status_ref);
+        }
+    }
     pub async fn serve(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
         let mut stream = if self.as_client {
             Stream::open(&self.conn).await?
@@ -38,6 +51,7 @@ impl RemoteNodeInner {
             log::error!("first heartbeat failed: {}", err);
             return Err(err);
         };
+        self.set_status(NodeStatus::Running);
         log::trace!("first heartbeat finished");
         let (tx, rx) = mpsc::channel(32);
         let self_hs = self.clone();
@@ -78,7 +92,10 @@ impl RemoteNodeInner {
             }
         }
         let _ = tx.send(None).await;
-        hs_handle.await?
+        self.set_status(NodeStatus::Stopping);
+        let ret = hs_handle.await?;
+        self.set_status(NodeStatus::Stopped);
+        ret
     }
     async fn handle_all_streams(
         self: Arc<Self>,

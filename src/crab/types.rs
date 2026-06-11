@@ -1,5 +1,6 @@
 use crate::crab::utils::runit::Worker;
 use serde::Deserialize;
+use std::fmt::Display;
 use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8,6 +9,24 @@ pub enum NodeStatus {
     Running,
     Stopping,
     Stopped,
+}
+impl Display for NodeStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            NodeStatus::Ready => {
+                write!(f, "Ready")
+            }
+            NodeStatus::Running => {
+                write!(f, "Running")
+            }
+            NodeStatus::Stopping => {
+                write!(f, "Stopping")
+            }
+            NodeStatus::Stopped => {
+                write!(f, "Stopped")
+            }
+        }
+    }
 }
 #[derive(Debug, Deserialize, Copy, Clone)]
 #[serde(default)]
