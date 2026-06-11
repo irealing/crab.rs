@@ -50,14 +50,14 @@ impl LocalEndpointInner {
     {
         let server_config = ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(tls.build_server_config()?).map_err(|err| {
-                log::error!("build quic server config error {}", err);
+                log::error!("build QUIC server config error {}", err);
                 CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
             })?,
         ));
         let client_crypto_cfg = tls.build_client_config()?;
         let client_config = ClientConfig::new(Arc::new(
             QuicClientConfig::try_from(client_crypto_cfg).map_err(|e| {
-                log::error!("build quic client config error{}", e);
+                log::error!("build QUIC client config error{}", e);
                 CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
             })?,
         ));
@@ -138,6 +138,7 @@ impl LocalEndpointInner {
     ) -> Result<(), CrabError> {
         let mut join_set = JoinSet::new();
         loop {
+            let hook = self.hook.clone();
             tokio::select! {
                 ret=self.endpoint.accept()=>{
                     match ret{
@@ -146,7 +147,17 @@ impl LocalEndpointInner {
                             let cancel_clone=cancel.clone();
                             join_set.spawn(async move   {
                                 match incoming.await{
-                                    Ok(conn)=>self_clone.handshake_with_timeout(conn, cancel_clone,false).await,
+                                    Ok(conn)=>{
+                                        hook.clone().on_connection_accepted(&conn).await.map_err(
+                                            |e|{
+                                                log::error!("connection from {} is blocked, error {}",conn.remote_address(), e);
+                                                e
+                                            }
+                                        )?;
+                                        let node= self_clone.handshake_with_timeout(conn, cancel_clone,false).await?;
+                                        hook.on_node_accepted(node.meta()).await?;
+                                        Ok(node)
+                                    },
                                     Err(err)=>{
                                         log::warn!("quic connection handshake error {}",err);
                                         Err(CrabError::ErrorCode(CrabError::HANDSHAKE_ERROR))
@@ -183,6 +194,7 @@ impl LocalEndpointInner {
         let mut join_set = JoinSet::new();
         let mut rx = rx;
         loop {
+            let hook = self.hook.clone();
             tokio::select! {
                 msg=rx.recv()=>{
                     match msg{
@@ -195,6 +207,7 @@ impl LocalEndpointInner {
                                 }else{
                                     log::warn!("remote node {}({}) exit",node.id(),node.addr());
                                 }
+                                hook.on_node_exited(&node.meta()).await;
                             });
                         },
                         None=>break,
@@ -306,6 +319,7 @@ impl LocalEndpointInner {
             } else {
                 log::info!("remote node {}({}) exit", node.id(), node.addr());
             }
+            self.hook.on_node_exited(node.meta()).await;
         }
         Ok(())
     }

@@ -3,6 +3,7 @@ use super::types::{NodeMetadata, Options};
 use super::utils::runit::Worker;
 use super::{CrabError, Node, types::NodeStatus};
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -13,16 +14,23 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 struct RemoteNodeInner {
-    node_id: String,
+    pub(super) meta: Arc<NodeMetadata>,
     conn: quinn::Connection,
-    remote_addr: SocketAddr,
     status_tx: watch::Sender<NodeStatus>,
     status_rx: watch::Receiver<NodeStatus>,
-    as_client: bool,
     hook: Arc<dyn Hook>,
     opts: Options,
 }
 impl RemoteNodeInner {
+    fn node_id(&self) -> &str {
+        &self.meta.node_id
+    }
+    fn remote_addr(&self) -> SocketAddr {
+        self.meta.remote_addr
+    }
+    fn as_client(&self) -> bool {
+        self.meta.as_client
+    }
     fn set_status(&self, status: NodeStatus) {
         let status_ref = &status;
         if self.status_tx.send_if_modified(|v| {
@@ -33,7 +41,7 @@ impl RemoteNodeInner {
                 false
             };
         }) {
-            log::info!("node {} status {}", self.node_id, status_ref);
+            log::info!("node {} status {}", self.node_id(), status_ref);
         }
     }
     async fn accept(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
@@ -111,7 +119,7 @@ impl RemoteNodeInner {
         stream: &mut Stream,
         cancel: CancellationToken,
     ) -> Result<(), CrabError> {
-        if self.as_client {
+        if self.as_client() {
             self.heartbeat_as_client(stream, cancel).await
         } else {
             self.heartbeat_as_server(stream, cancel).await
@@ -124,7 +132,7 @@ impl RemoteNodeInner {
     ) -> Result<(), CrabError> {
         tokio::select! {
             _=time::sleep(Duration::from_secs(self.opts.heartbeat_interval)) =>{
-                self.hook.heartbeat_as_client(stream).await
+                self.hook.heartbeat_as_client(self.meta.deref(), stream).await
             }
             _ = cancel.cancelled() => {
                  Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
@@ -140,7 +148,7 @@ impl RemoteNodeInner {
             _ = cancel.cancelled() => {
                 Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
             }
-            res=timeout(Duration::from_secs(self.opts.heartbeat_timeout), self.hook.heartbeat(stream))=>{
+            res=timeout(Duration::from_secs(self.opts.heartbeat_timeout), self.hook.heartbeat(self.meta.deref(),stream))=>{
                match res {
                     Ok(Ok(_))=>{
                         Ok(())
@@ -170,17 +178,16 @@ impl RemoteNode {
         let (status_tx, status_rx) = watch::channel(NodeStatus::Ready);
         Self {
             inner: Arc::new(RemoteNodeInner {
-                node_id: ret.node_id.clone(),
-                remote_addr: conn.remote_address(),
+                meta: Arc::new(ret),
                 conn,
                 status_tx,
                 status_rx,
-                as_client,
                 hook,
                 opts,
             }),
         }
     }
+
     async fn make_first_heartbeat(&self, cancel: CancellationToken) -> Result<Stream, CrabError> {
         let mut stream = if self.as_client() {
             Stream::open(&self.inner.conn).await?
@@ -188,11 +195,17 @@ impl RemoteNode {
             Stream::accept(&self.inner.conn).await?
         };
         if self.as_client() {
-            self.inner.hook.heartbeat_as_client(&mut stream).await?;
+            self.inner
+                .hook
+                .heartbeat_as_client(self.meta(), &mut stream)
+                .await?;
         } else {
-            self.inner.hook.heartbeat(&mut stream).await?;
+            self.inner.hook.heartbeat(self.meta(), &mut stream).await?;
         }
         Ok(stream)
+    }
+    pub(super) fn meta(&self) -> &NodeMetadata {
+        self.inner.meta.deref()
     }
 }
 #[async_trait::async_trait]
@@ -206,8 +219,8 @@ impl Worker for RemoteNode {
         .map_err(|_| CrabError::ErrorCode(CrabError::HEARTBEAT_TIMEOUT))??;
         log::trace!(
             "node {}({}) first heartbeat finished",
-            self.inner.node_id,
-            self.inner.remote_addr
+            self.inner.node_id(),
+            self.inner.remote_addr()
         );
         self.inner.set_status(NodeStatus::Running);
         let hb_cancel = cancel.clone();
@@ -225,7 +238,7 @@ impl Worker for RemoteNode {
                     if let Err(err) = hb_res {
                         Err(err)
                     }else{
-                        log::trace!("node {}({}) heartbeat finished", self.inner.node_id, self.inner.remote_addr);
+                        log::trace!("node {}({}) heartbeat finished", self.inner.node_id(), self.inner.remote_addr());
                         Ok(())
                     }
                 }
@@ -235,8 +248,8 @@ impl Worker for RemoteNode {
                 if !matches!(err, CrabError::ErrorCode(CrabError::CANCELED_ERROR)) {
                     log::error!(
                         "node {}({})  heartbeat error :{}",
-                        self.inner.node_id,
-                        self.inner.remote_addr,
+                        self.inner.node_id(),
+                        self.inner.remote_addr(),
                         err
                     );
                 }
@@ -250,15 +263,15 @@ impl Worker for RemoteNode {
 }
 impl Node for RemoteNode {
     fn id(&self) -> &str {
-        &self.inner.node_id
+        &self.inner.node_id()
     }
     fn status(&self) -> NodeStatus {
         *self.inner.status_rx.borrow()
     }
     fn addr(&self) -> SocketAddr {
-        self.inner.remote_addr
+        self.inner.remote_addr()
     }
     fn as_client(&self) -> bool {
-        self.inner.as_client
+        self.inner.as_client()
     }
 }

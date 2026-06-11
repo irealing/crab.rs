@@ -1,11 +1,11 @@
+use crate::crab::CrabError;
 use crate::crab::types::NodeMetadata;
-use crate::crab::{CrabError, Node};
 use bincode_next::config;
 use bincode_next::serde::{decode_from_slice, encode_into_std_write};
-use binrw::{binrw, BinRead, BinWrite};
+use binrw::{BinRead, BinWrite, binrw};
 use bytes::BufMut;
 use quinn::{Connection, RecvStream, SendStream};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::io::Cursor;
 use tokio_util::bytes::BytesMut;
 
@@ -162,11 +162,20 @@ pub(super) trait Hook: Send + Sync {
     async fn handshake_as_client(&self, _: &Connection) -> Result<NodeMetadata, CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
-    async fn heartbeat(&self, _: &mut Stream) -> Result<(), CrabError> {
+    async fn heartbeat(&self, _: &NodeMetadata, _: &mut Stream) -> Result<(), CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
-    async fn heartbeat_as_client(&self, _: &mut Stream) -> Result<(), CrabError> {
+    async fn heartbeat_as_client(&self, _: &NodeMetadata, _: &mut Stream) -> Result<(), CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
+    }
+    async fn on_connection_accepted(&self, _: &Connection) -> Result<(), CrabError> {
+        Ok(())
+    }
+    async fn on_node_accepted(&self, _: &NodeMetadata) -> Result<(), CrabError> {
+        Ok(())
+    }
+    async fn on_node_exited(&self, meta: &NodeMetadata) {
+        log::trace!("on_node_exited {}", meta.node_id);
     }
 }
 pub(super) struct ProtoWrapper<S, H, P: Protocol<Handshake = S, Heartbeat = H>> {
@@ -250,7 +259,7 @@ where
         };
         Ok(meta)
     }
-    async fn heartbeat(&self, stream: &mut Stream) -> Result<(), CrabError> {
+    async fn heartbeat(&self, _: &NodeMetadata, stream: &mut Stream) -> Result<(), CrabError> {
         match stream
             .read_message::<P::Heartbeat>()
             .await
@@ -268,7 +277,11 @@ where
             }
         }
     }
-    async fn heartbeat_as_client(&self, stream: &mut Stream) -> Result<(), CrabError> {
+    async fn heartbeat_as_client(
+        &self,
+        _: &NodeMetadata,
+        stream: &mut Stream,
+    ) -> Result<(), CrabError> {
         match self.protocol.make_heartbeat() {
             Err(err) => {
                 log::warn!("make heartbeat failed {},write ack with error", err);
