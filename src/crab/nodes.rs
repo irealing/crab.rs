@@ -1,5 +1,5 @@
-use super::proto::{HandshakeRet, Hook, Stream};
-use super::types::Options;
+use super::proto::{Hook, Stream};
+use super::types::{NodeMetadata, Options};
 use super::utils::runit::Worker;
 use super::{CrabError, Node, types::NodeStatus};
 use std::net::SocketAddr;
@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 struct RemoteNodeInner {
     node_id: String,
     conn: quinn::Connection,
-    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
     status_tx: watch::Sender<NodeStatus>,
     status_rx: watch::Receiver<NodeStatus>,
     as_client: bool,
@@ -161,7 +161,7 @@ pub(super) struct RemoteNode {
 }
 impl RemoteNode {
     pub(super) fn new(
-        ret: &HandshakeRet,
+        ret: NodeMetadata,
         conn: quinn::Connection,
         as_client: bool,
         hook: Arc<dyn Hook>,
@@ -171,7 +171,7 @@ impl RemoteNode {
         Self {
             inner: Arc::new(RemoteNodeInner {
                 node_id: ret.node_id.clone(),
-                local_addr: conn.remote_address(),
+                remote_addr: conn.remote_address(),
                 conn,
                 status_tx,
                 status_rx,
@@ -207,7 +207,7 @@ impl Worker for RemoteNode {
         log::trace!(
             "node {}({}) first heartbeat finished",
             self.inner.node_id,
-            self.inner.local_addr
+            self.inner.remote_addr
         );
         self.inner.set_status(NodeStatus::Running);
         let hb_cancel = cancel.clone();
@@ -225,7 +225,7 @@ impl Worker for RemoteNode {
                     if let Err(err) = hb_res {
                         Err(err)
                     }else{
-                        log::trace!("node {}({}) heartbeat finished", self.inner.node_id, self.inner.local_addr);
+                        log::trace!("node {}({}) heartbeat finished", self.inner.node_id, self.inner.remote_addr);
                         Ok(())
                     }
                 }
@@ -236,7 +236,7 @@ impl Worker for RemoteNode {
                     log::error!(
                         "node {}({})  heartbeat error :{}",
                         self.inner.node_id,
-                        self.inner.local_addr,
+                        self.inner.remote_addr,
                         err
                     );
                 }
@@ -256,7 +256,7 @@ impl Node for RemoteNode {
         *self.inner.status_rx.borrow()
     }
     fn addr(&self) -> SocketAddr {
-        self.inner.local_addr
+        self.inner.remote_addr
     }
     fn as_client(&self) -> bool {
         self.inner.as_client

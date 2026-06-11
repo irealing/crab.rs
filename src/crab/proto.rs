@@ -1,10 +1,11 @@
+use crate::crab::types::NodeMetadata;
 use crate::crab::{CrabError, Node};
 use bincode_next::config;
 use bincode_next::serde::{decode_from_slice, encode_into_std_write};
-use binrw::{BinRead, BinWrite, binrw};
+use binrw::{binrw, BinRead, BinWrite};
 use bytes::BufMut;
 use quinn::{Connection, RecvStream, SendStream};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::Cursor;
 use tokio_util::bytes::BytesMut;
 
@@ -57,9 +58,6 @@ impl AckMessage {
 
 const HEADER_SIZE: usize = 12;
 const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
-pub struct HandshakeRet {
-    pub node_id: String,
-}
 
 pub trait HandshakePacket: DeserializeOwned + Serialize + Send + Sync {
     fn node_id(&self) -> &str;
@@ -69,12 +67,16 @@ pub trait Protocol: Send + Sync {
     type Heartbeat: DeserializeOwned + Serialize + Send + Sync + 'static;
     fn make_handshake(&self) -> Result<Self::Handshake, CrabError>;
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError>;
-    fn on_handshake(&self, _: &Self::Handshake) -> Result<Self::Handshake, CrabError> {
+    fn on_handshake(
+        &self,
+        _: &NodeMetadata,
+        _: &Self::Handshake,
+    ) -> Result<Self::Handshake, CrabError> {
         self.make_handshake()
     }
     fn on_heartbeat(
         &self,
-        _: &dyn Node,
+        _: &NodeMetadata,
         _: &Self::Heartbeat,
     ) -> Result<Self::Heartbeat, CrabError> {
         self.make_heartbeat()
@@ -154,10 +156,10 @@ impl Stream {
 
 #[async_trait::async_trait]
 pub(super) trait Hook: Send + Sync {
-    async fn handshake(&self, _: &Connection) -> Result<HandshakeRet, CrabError> {
+    async fn handshake(&self, _: &Connection) -> Result<NodeMetadata, CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
-    async fn handshake_as_client(&self, _: &Connection) -> Result<HandshakeRet, CrabError> {
+    async fn handshake_as_client(&self, _: &Connection) -> Result<NodeMetadata, CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
     async fn heartbeat(&self, _: &mut Stream) -> Result<(), CrabError> {
@@ -185,7 +187,7 @@ where
     S: HandshakePacket + 'static,
     H: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
-    async fn handshake(&self, conn: &Connection) -> Result<HandshakeRet, CrabError> {
+    async fn handshake(&self, conn: &Connection) -> Result<NodeMetadata, CrabError> {
         log::trace!("handshake with connection from {}", conn.remote_address());
         let mut session = Stream::accept(conn).await?;
         let (header, handshake) = session.read_message::<P::Handshake>().await.map_err(|e| {
@@ -200,7 +202,12 @@ where
             );
             return Err(CrabError::ErrorCode(CrabError::BAD_MESSAGE_HEADER));
         }
-        match self.protocol.on_handshake(&handshake) {
+        let meta = NodeMetadata {
+            node_id: handshake.node_id().to_string(),
+            remote_addr: conn.remote_address(),
+            as_client: true,
+        };
+        match self.protocol.on_handshake(&meta, &handshake) {
             Err(err) => {
                 session
                     .write_error(Method::Handshake, MessageHeader::OPTION_ERROR, &err)
@@ -215,14 +222,12 @@ where
                     log::error!("write handshake message failed {:}", err);
                     Err(CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE))
                 } else {
-                    Ok(HandshakeRet {
-                        node_id: ret.node_id().to_string(),
-                    })
+                    Ok(meta)
                 }
             }
         }
     }
-    async fn handshake_as_client(&self, conn: &Connection) -> Result<HandshakeRet, CrabError> {
+    async fn handshake_as_client(&self, conn: &Connection) -> Result<NodeMetadata, CrabError> {
         log::trace!(
             "handshake_as_client with connection {}",
             conn.remote_address()
@@ -238,9 +243,12 @@ where
             conn.remote_address(),
             body.node_id()
         );
-        Ok(HandshakeRet {
+        let meta = NodeMetadata {
             node_id: body.node_id().to_string(),
-        })
+            remote_addr: conn.remote_address(),
+            as_client: false,
+        };
+        Ok(meta)
     }
     async fn heartbeat(&self, stream: &mut Stream) -> Result<(), CrabError> {
         match stream

@@ -52,6 +52,12 @@ pub trait Endpoint: Worker {
     fn id(&self) -> &str;
     fn addr(&self) -> SocketAddr;
 }
+
+pub struct NodeMetadata {
+    pub node_id: String,
+    pub remote_addr: SocketAddr,
+    pub as_client: bool,
+}
 pub trait Node: Send + Sync {
     fn id(&self) -> &str;
     fn status(&self) -> NodeStatus;

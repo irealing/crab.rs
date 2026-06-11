@@ -6,9 +6,9 @@ use std::time::Duration;
 use super::utils::runit::Worker;
 
 use super::nodes::RemoteNode;
-use super::types::{Endpoint, Options};
+use super::types::{Endpoint, NodeMetadata, Options};
 use super::{CrabError, utils::crypto::TLSProvider};
-use crate::crab::proto::{HandshakePacket, HandshakeRet, Hook, ProtoWrapper, Protocol};
+use crate::crab::proto::{HandshakePacket, Hook, ProtoWrapper, Protocol};
 use quinn::ClientConfig;
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ServerConfig, crypto::rustls::QuicServerConfig};
@@ -89,7 +89,7 @@ impl LocalEndpointInner {
         self: Arc<Self>,
         conn: &quinn::Connection,
         as_client: bool,
-    ) -> Result<HandshakeRet, CrabError> {
+    ) -> Result<NodeMetadata, CrabError> {
         if as_client {
             log::debug!("handshake with connection from {}", conn.remote_address());
             self.hook.handshake_as_client(&conn).await
@@ -122,7 +122,7 @@ impl LocalEndpointInner {
             }
         } {
             Ok(ret) => Ok(RemoteNode::new(
-                &ret,
+                ret,
                 conn,
                 as_client,
                 self.hook.clone(),
