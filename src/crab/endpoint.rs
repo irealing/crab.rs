@@ -124,7 +124,6 @@ impl LocalEndpointInner {
             Ok(ret) => Ok(RemoteNode::new(
                 ret,
                 conn,
-                as_client,
                 self.hook.clone(),
                 self.cfg.options,
             )),

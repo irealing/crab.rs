@@ -171,7 +171,6 @@ impl RemoteNode {
     pub(super) fn new(
         ret: NodeMetadata,
         conn: quinn::Connection,
-        as_client: bool,
         hook: Arc<dyn Hook>,
         opts: Options,
     ) -> Self {
@@ -194,15 +193,22 @@ impl RemoteNode {
         } else {
             Stream::accept(&self.inner.conn).await?
         };
-        if self.as_client() {
+        let co = if self.as_client() {
             self.inner
                 .hook
                 .heartbeat_as_client(self.meta(), &mut stream)
-                .await?;
         } else {
-            self.inner.hook.heartbeat(self.meta(), &mut stream).await?;
+            self.inner.hook.heartbeat(self.meta(), &mut stream)
+        };
+        tokio::select! {
+            _=cancel.cancelled()=>{
+                Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
+            }
+            ret=co=>{
+                ret?;
+                Ok(stream)
+            }
         }
-        Ok(stream)
     }
     pub(super) fn meta(&self) -> &NodeMetadata {
         self.inner.meta.deref()
