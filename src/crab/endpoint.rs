@@ -158,7 +158,7 @@ impl LocalEndpointInner {
                                         Ok(node)
                                     },
                                     Err(err)=>{
-                                        log::warn!("quic connection handshake error {}",err);
+                                        log::warn!("node connection handshake error {}",err);
                                         Err(CrabError::ErrorCode(CrabError::HANDSHAKE_ERROR))
                                     }
                                 }
@@ -178,6 +178,7 @@ impl LocalEndpointInner {
                     }
                 }
                 _=cancel.cancelled()=>{
+                    log::debug!("endpoint connection accept connection cancel");
                     break;
                 }
             }
@@ -198,13 +199,13 @@ impl LocalEndpointInner {
                 msg=rx.recv()=>{
                     match msg{
                         Some(node)=>{
-                            let cancel_copy = cancel.clone();
+                            let node_cancel_token = cancel.child_token();
                             join_set.spawn(async move{
                                 log::info!("start remote node {}({})",node.id(),node.addr());
-                                if let Err(err)=node.serve(cancel_copy).await{
+                                if let Err(err)=node.serve(node_cancel_token).await{
                                     log::warn!("remote node {}({}) exit with error {}",node.id(),node.addr(),err);
                                 }else{
-                                    log::warn!("remote node {}({}) exit",node.id(),node.addr());
+                                    log::debug!("remote node {}({}) exit",node.id(),node.addr());
                                 }
                                 hook.on_node_exited(&node.meta()).await;
                             });
@@ -230,12 +231,11 @@ impl LocalEndpointInner {
             let self_copy = self.clone();
             let cancel_copy = cancel.clone();
             join_set.spawn(async move {
-                let local_cancel = cancel_copy.clone();
-                if let Err(e) = self_copy.start_listen(local_cancel).await {
-                    log::error!("local node listen error {}", e);
-                    cancel_copy.cancel();
+                if let Err(e) = self_copy.start_listen(cancel_copy).await {
+                    log::error!("endpoint listen finished with error {}", e);
                     Err(e)
                 } else {
+                    log::trace!("endpoint listen finished");
                     Ok(())
                 }
             });
@@ -243,12 +243,16 @@ impl LocalEndpointInner {
         if self.cfg.remote_addr.is_some() {
             let cancel_copy = cancel.clone();
             let self_copy = self.clone();
-            join_set.spawn(async move { self_copy.start_all_remote_node(cancel_copy).await });
+            join_set.spawn(async move {
+                let res = self_copy.start_all_remote_node(cancel_copy).await;
+                log::trace!("endpoint all remote node loop exit");
+                res
+            });
         }
         while let Some(res) = join_set.join_next().await {
             match res {
                 Ok(Err(err)) => {
-                    log::error!("remote node join error {}", err);
+                    log::error!("endpoint join error {}", err);
                 }
                 Err(err) => {
                     log::error!("local node worker join error {}", err);
@@ -256,7 +260,7 @@ impl LocalEndpointInner {
                 _ => continue,
             }
         }
-        log::info!("local node worker finished");
+        log::trace!("endpoint worker finished");
         Ok(())
     }
     async fn start_all_remote_node(
@@ -376,8 +380,16 @@ impl LocalEndpointInner {
         let mut join_set = JoinSet::new();
         let (self_accept, self_serve) = (self.clone(), self.clone());
         let (accept_cancel, serve_cancel) = (cancel.clone(), cancel.clone());
-        join_set.spawn(async move { self_accept.listen(accept_cancel, tx).await });
-        join_set.spawn(async move { self_serve.serve_all_node(serve_cancel, rx).await });
+        join_set.spawn(async move {
+            let ret = self_accept.listen(accept_cancel, tx).await;
+            log::trace!("endpoint accept loop finished");
+            ret
+        });
+        join_set.spawn(async move {
+            let ret = self_serve.serve_all_node(serve_cancel, rx).await;
+            log::trace!("endpoint all node loop finished");
+            ret
+        });
         let mut r = None;
         while let Some(ret) = join_set.join_next().await {
             match ret {

@@ -6,8 +6,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::crab::utils::crypto::TLSProvider;
 use crate::crab::{
-    create_local_endpoint, utils::runit::{worker_group, WaitExitWorker, Worker},
-    CrabError,
+    CrabError, create_local_endpoint,
+    utils::runit::{WaitExitWorker, Worker, worker_group},
 };
 use app::{config, protocol};
 
@@ -36,9 +36,8 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
         cfg.endpoint,
         protocol::SimpleProtocol::new(),
     )?);
-    let workers: Vec<Arc<dyn Worker>> = vec![
-        Arc::new(WaitExitWorker::new()),
-        local_node as Arc<dyn Worker>,
-    ];
-    worker_group(workers).serve(CancellationToken::new()).await
+    let workers: Vec<Arc<dyn Worker>> = vec![local_node as Arc<dyn Worker>];
+    WaitExitWorker::new(workers)
+        .serve(CancellationToken::new())
+        .await
 }

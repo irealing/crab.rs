@@ -46,7 +46,7 @@ impl RemoteNodeInner {
     }
     async fn accept(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
         let (tx, rx) = mpsc::channel(32);
-        let cancel_c = cancel.child_token();
+        let cancel_c = cancel.clone();
         let cancel_hs = cancel_c.clone();
         let self_hs = self.clone();
         let self_clone = self.clone();
