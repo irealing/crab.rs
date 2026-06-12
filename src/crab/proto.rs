@@ -259,12 +259,14 @@ where
         };
         Ok(meta)
     }
-    async fn heartbeat(&self, _: &NodeMetadata, stream: &mut Stream) -> Result<(), CrabError> {
+    async fn heartbeat(&self, meta: &NodeMetadata, stream: &mut Stream) -> Result<(), CrabError> {
         match stream
             .read_message::<P::Heartbeat>()
             .await
-            .and_then(|_| self.protocol.make_heartbeat())
-        {
+            .and_then(|(_, body)| {
+                self.protocol.on_heartbeat(&meta, &body)?;
+                self.protocol.make_heartbeat()
+            }) {
             Err(err) => {
                 stream
                     .write_error(Method::Heartbeat, MessageHeader::OPTION_ERROR, &err)
@@ -273,13 +275,19 @@ where
             Ok(ret) => {
                 stream
                     .write_message(Method::Heartbeat, MessageHeader::OPTION_NONE, &ret)
-                    .await
+                    .await?;
+                let (_, ack) = stream.read_message::<AckMessage>().await?;
+                if ack.code != CrabError::NO_ERROR {
+                    Err(CrabError::ErrorCode(ack.code))
+                } else {
+                    Ok(())
+                }
             }
         }
     }
     async fn heartbeat_as_client(
         &self,
-        _: &NodeMetadata,
+        meta: &NodeMetadata,
         stream: &mut Stream,
     ) -> Result<(), CrabError> {
         match self.protocol.make_heartbeat() {
@@ -295,7 +303,26 @@ where
                     .await?
             }
         }
-        let _ = stream.read_message::<P::Heartbeat>().await?;
+        let handshake_ret = stream
+            .read_message::<P::Heartbeat>()
+            .await
+            .and_then(|(_, body)| self.protocol.on_heartbeat(meta, &body));
+        if let Err(err) = handshake_ret {
+            stream
+                .write_error(Method::Heartbeat, MessageHeader::OPTION_ERROR, &err)
+                .await?;
+        } else {
+            stream
+                .write_message(
+                    Method::Heartbeat,
+                    MessageHeader::OPTION_NONE,
+                    &AckMessage {
+                        code: CrabError::NO_ERROR,
+                        msg: None,
+                    },
+                )
+                .await?;
+        }
         Ok(())
     }
 }
