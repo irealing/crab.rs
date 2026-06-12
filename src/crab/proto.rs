@@ -1,5 +1,4 @@
-use crate::crab::CrabError;
-use crate::crab::types::NodeMetadata;
+use super::{CrabError, Handle, NodeMetadata};
 use bincode_next::config;
 use bincode_next::serde::{decode_from_slice, encode_into_std_write};
 use binrw::{BinRead, BinWrite, binrw};
@@ -171,158 +170,16 @@ pub(super) trait Hook: Send + Sync {
     async fn on_connection_accepted(&self, _: &Connection) -> Result<(), CrabError> {
         Ok(())
     }
-    async fn on_node_accepted(&self, _: &NodeMetadata) -> Result<(), CrabError> {
+    async fn on_node_accepted(&self, _: &NodeMetadata, _: Handle) -> Result<(), CrabError> {
         Ok(())
     }
     async fn on_node_exited(&self, meta: &NodeMetadata) {
         log::trace!("on_node_exited {}", meta.node_id);
     }
 }
-pub(super) struct ProtoWrapper<S, H, P: Protocol<Handshake = S, Heartbeat = H>> {
-    protocol: P,
-}
-impl<S, H, P> ProtoWrapper<S, H, P>
-where
-    P: Protocol<Handshake = S, Heartbeat = H>,
-{
-    pub fn new(protocol: P) -> Self {
-        Self { protocol }
-    }
-}
+pub struct Command;
 #[async_trait::async_trait]
-impl<S, H, P> Hook for ProtoWrapper<S, H, P>
-where
-    P: Protocol<Handshake = S, Heartbeat = H>,
-    S: HandshakePacket + 'static,
-    H: DeserializeOwned + Serialize + Sync + Send + 'static,
-{
-    async fn handshake(&self, conn: &Connection) -> Result<NodeMetadata, CrabError> {
-        log::trace!("handshake with connection from {}", conn.remote_address());
-        let mut session = Stream::accept(conn).await?;
-        let (header, handshake) = session.read_message::<P::Handshake>().await.map_err(|e| {
-            log::warn!("handshake failed,read header {:?}", e);
-            e
-        })?;
-        if header.method != Method::Handshake {
-            log::warn!(
-                "invalid message method,accept {:?} receive {:?} ",
-                Method::Handshake,
-                header.method
-            );
-            return Err(CrabError::ErrorCode(CrabError::BAD_MESSAGE_HEADER));
-        }
-        let meta = NodeMetadata {
-            node_id: handshake.node_id().to_string(),
-            remote_addr: conn.remote_address(),
-            as_client: true,
-        };
-        match self.protocol.on_handshake(&meta, &handshake) {
-            Err(err) => {
-                session
-                    .write_error(Method::Handshake, MessageHeader::OPTION_ERROR, &err)
-                    .await?;
-                Err(err)
-            }
-            Ok(ret) => {
-                if let Err(err) = session
-                    .write_message(Method::Handshake, header.option, &ret)
-                    .await
-                {
-                    log::error!("write handshake message failed {:}", err);
-                    Err(CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE))
-                } else {
-                    Ok(meta)
-                }
-            }
-        }
-    }
-    async fn handshake_as_client(&self, conn: &Connection) -> Result<NodeMetadata, CrabError> {
-        log::trace!(
-            "handshake_as_client with connection {}",
-            conn.remote_address()
-        );
-        let handshake = self.protocol.make_handshake()?;
-        let mut session = Stream::open(conn).await?;
-        session
-            .write_message(Method::Handshake, 0, &handshake)
-            .await?;
-        let (_, body) = session.read_message::<P::Handshake>().await?;
-        log::trace!(
-            "remote {} node id {}",
-            conn.remote_address(),
-            body.node_id()
-        );
-        let meta = NodeMetadata {
-            node_id: body.node_id().to_string(),
-            remote_addr: conn.remote_address(),
-            as_client: false,
-        };
-        Ok(meta)
-    }
-    async fn heartbeat(&self, meta: &NodeMetadata, stream: &mut Stream) -> Result<(), CrabError> {
-        match stream
-            .read_message::<P::Heartbeat>()
-            .await
-            .and_then(|(_, body)| {
-                self.protocol.on_heartbeat(&meta, &body)?;
-                self.protocol.make_heartbeat()
-            }) {
-            Err(err) => {
-                stream
-                    .write_error(Method::Heartbeat, MessageHeader::OPTION_ERROR, &err)
-                    .await
-            }
-            Ok(ret) => {
-                stream
-                    .write_message(Method::Heartbeat, MessageHeader::OPTION_NONE, &ret)
-                    .await?;
-                let (_, ack) = stream.read_message::<AckMessage>().await?;
-                if ack.code != CrabError::NO_ERROR {
-                    Err(CrabError::ErrorCode(ack.code))
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-    async fn heartbeat_as_client(
-        &self,
-        meta: &NodeMetadata,
-        stream: &mut Stream,
-    ) -> Result<(), CrabError> {
-        match self.protocol.make_heartbeat() {
-            Err(err) => {
-                log::warn!("make heartbeat failed {},write ack with error", err);
-                stream
-                    .write_error(Method::Heartbeat, MessageHeader::OPTION_ERROR, &err)
-                    .await?
-            }
-            Ok(ret) => {
-                stream
-                    .write_message(Method::Heartbeat, MessageHeader::OPTION_NONE, &ret)
-                    .await?
-            }
-        }
-        let handshake_ret = stream
-            .read_message::<P::Heartbeat>()
-            .await
-            .and_then(|(_, body)| self.protocol.on_heartbeat(meta, &body));
-        if let Err(err) = handshake_ret {
-            stream
-                .write_error(Method::Heartbeat, MessageHeader::OPTION_ERROR, &err)
-                .await?;
-        } else {
-            stream
-                .write_message(
-                    Method::Heartbeat,
-                    MessageHeader::OPTION_NONE,
-                    &AckMessage {
-                        code: CrabError::NO_ERROR,
-                        msg: None,
-                    },
-                )
-                .await?;
-        }
-        Ok(())
-    }
+pub(super) trait AsyncTask: Send {
+    fn command(&self) -> Command;
+    async fn execute(&self, cmd: &Command) -> Result<(), CrabError>;
 }

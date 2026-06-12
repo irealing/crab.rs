@@ -1,11 +1,13 @@
-mod errors;
 mod endpoint;
-mod types;
-pub mod proto;
-mod nodes;
+mod errors;
 mod node_handle;
+mod nodes;
+pub mod proto;
+mod types;
 pub mod utils;
+mod wrapper;
 
-pub use errors::CrabError;
 pub use endpoint::{EndpointConfig, create_local_endpoint};
-pub use types::Node;
+pub use errors::CrabError;
+pub use node_handle::Handle;
+pub use types::{Node, NodeMetadata};

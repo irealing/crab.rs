@@ -1,7 +1,8 @@
-use super::proto::{Hook, Stream};
+use super::proto::{AsyncTask, Hook, Stream};
 use super::types::{NodeMetadata, Options};
 use super::utils::runit::Worker;
 use super::{CrabError, Node, types::NodeStatus};
+use crate::crab::node_handle::Handle;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -20,6 +21,7 @@ struct RemoteNodeInner {
     status_rx: watch::Receiver<NodeStatus>,
     hook: Arc<dyn Hook>,
     opts: Options,
+    cmd_rx: mpsc::Receiver<Box<dyn AsyncTask>>,
 }
 impl RemoteNodeInner {
     fn node_id(&self) -> &str {
@@ -173,18 +175,25 @@ impl RemoteNode {
         conn: quinn::Connection,
         hook: Arc<dyn Hook>,
         opts: Options,
-    ) -> Self {
+    ) -> (Self, Handle) {
         let (status_tx, status_rx) = watch::channel(NodeStatus::Ready);
-        Self {
-            inner: Arc::new(RemoteNodeInner {
-                meta: Arc::new(ret),
-                conn,
-                status_tx,
-                status_rx,
-                hook,
-                opts,
-            }),
-        }
+        let (cmd_tx, cmd_rx) = mpsc::channel(10);
+        let inner = RemoteNodeInner {
+            meta: Arc::new(ret),
+            conn,
+            status_tx,
+            status_rx,
+            hook,
+            opts,
+            cmd_rx,
+        };
+        let handle = Handle::new(inner.meta.clone(), inner.status_rx.clone());
+        (
+            Self {
+                inner: Arc::new(inner),
+            },
+            handle,
+        )
     }
 
     async fn make_first_heartbeat(&self, cancel: CancellationToken) -> Result<Stream, CrabError> {
