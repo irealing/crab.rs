@@ -187,7 +187,7 @@ impl RemoteNode {
             opts,
             cmd_rx,
         };
-        let handle = Handle::new(inner.meta.clone(), inner.status_rx.clone());
+        let handle = Handle::new(inner.meta.clone(), inner.status_rx.clone(), cmd_tx.clone());
         (
             Self {
                 inner: Arc::new(inner),

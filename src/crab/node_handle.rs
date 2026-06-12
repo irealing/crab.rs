@@ -1,20 +1,30 @@
 use super::Node;
+use super::proto::AsyncTask;
 use super::types::{NodeMetadata, NodeStatus};
 use std::net::SocketAddr;
+use tokio::sync::{mpsc, watch};
 use std::sync::Arc;
-use tokio::sync::watch;
 
 struct HandleInner {
     meta: Arc<NodeMetadata>,
     status_rx: watch::Receiver<NodeStatus>,
+    cmd_tx: mpsc::Sender<Box<dyn AsyncTask>>,
 }
 pub struct Handle {
     inner: Arc<HandleInner>,
 }
 impl Handle {
-    pub(super) fn new(meta: Arc<NodeMetadata>, status_rx: watch::Receiver<NodeStatus>) -> Self {
+    pub(super) fn new(
+        meta: Arc<NodeMetadata>,
+        status_rx: watch::Receiver<NodeStatus>,
+        cmd_tx: mpsc::Sender<Box<dyn AsyncTask>>,
+    ) -> Self {
         Self {
-            inner: Arc::new(HandleInner { meta, status_rx }),
+            inner: Arc::new(HandleInner {
+                meta,
+                status_rx,
+                cmd_tx,
+            }),
         }
     }
 }
