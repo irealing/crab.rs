@@ -198,7 +198,7 @@ impl LocalEndpointInner {
                             let cancel_clone=cancel.clone();
                             let hook=self.hook.clone();
                             join_set.spawn(async move {
-                                hook.on_connection_accepted(&conn).await.map_err( |e|{
+                                hook.on_connection_accepted(&conn).await.map_err(|e|{
                                     log::warn!("connection from {} is blocked,error {}",conn.remote_address(),e);
                                     e
                                 })?;
@@ -221,12 +221,14 @@ impl LocalEndpointInner {
                     }
                 },
                 _=cancel.cancelled()=>{
-                    log::debug!("endpoint connection accept connection cancel");
+                    log::debug!("endpoint connection loop cancel");
                     break;
                 }
             }
         }
         join_set.shutdown().await;
+        drop(node_tx);
+        log::info!("waiting for all connection done");
         handle.await?
     }
     async fn serve_all_node(
@@ -306,7 +308,11 @@ impl LocalEndpointInner {
             return Ok(());
         }
         let self_nodes = self.clone();
-        join_set.spawn(async move { self_nodes.serve_all_connection(cancel, rx).await });
+        join_set.spawn(async move {
+            let ret = self_nodes.serve_all_connection(cancel, rx).await;
+            log::warn!("endpoint all connection exit");
+            ret
+        });
         while let Some(res) = join_set.join_next().await {
             match res {
                 Ok(Err(err)) => {
@@ -362,15 +368,16 @@ impl LocalEndpointInner {
             }
             log::debug!("try connect to remote node {}", remote_addr);
             if let Ok(conn) = self.connect_remote_node(remote_addr, cancel.clone()).await {
-                log::debug!("connect to remote node {}", remote_addr);
+                log::debug!("remote node {} connection ready", remote_addr);
                 let (retry_tx, retry_rx) = oneshot::channel();
-                rx.send((conn, true, Some(retry_tx))).await.map_err(|e| {
+                rx.send((conn, true, Some(retry_tx))).await.map_err(|_| {
                     log::error!(
                         "remote {} worker exit with serve node channel error",
                         remote_addr,
                     );
                     CrabError::ErrorCode(CrabError::CANCELED_ERROR)
                 })?;
+                log::trace!("waiting for remote node {} exit", remote_addr);
                 retry_rx.await.map_err(|_| {
                     log::error!(
                         "remote {} worker exit with retry channel error",
