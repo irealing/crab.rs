@@ -24,7 +24,6 @@ use tokio_util::sync::CancellationToken;
 #[derive(Deserialize, Debug)]
 pub struct EndpointConfig {
     pub bind_address: String,
-    pub node_id: String,
     #[serde(default)]
     pub listen: bool,
     #[serde(default)]
@@ -45,7 +44,7 @@ impl LocalEndpointInner {
     const REMOTE_CONNECT_RETRY_DELAY: Duration = Duration::from_secs(10);
     async fn handshake(
         self: Arc<Self>,
-        conn: &quinn::Connection,
+        conn: &Connection,
         as_client: bool,
     ) -> Result<NodeMetadata, CrabError> {
         if as_client {
@@ -434,9 +433,6 @@ impl Worker for LocalEndpoint {
     }
 }
 impl Endpoint for LocalEndpoint {
-    fn id(&self) -> &str {
-        &self.inner.cfg.node_id
-    }
     fn addr(&self) -> SocketAddr {
         self.inner.local_addr.clone()
     }

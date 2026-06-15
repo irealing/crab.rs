@@ -49,7 +49,6 @@ impl Default for Options {
     }
 }
 pub trait Endpoint: Worker {
-    fn id(&self) -> &str;
     fn addr(&self) -> SocketAddr;
 }
 

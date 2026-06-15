@@ -7,8 +7,8 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinSet;
 use tokio::time;
 use tokio::time::timeout;
@@ -21,7 +21,7 @@ struct RemoteNodeInner {
     status_rx: watch::Receiver<NodeStatus>,
     hook: Arc<dyn Hook>,
     opts: Options,
-    cmd_rx: mpsc::Receiver<Box<dyn AsyncTask>>,
+    cmd_rx: Mutex<Option<mpsc::Receiver<Box<dyn AsyncTask>>>>,
 }
 impl RemoteNodeInner {
     fn node_id(&self) -> &str {
@@ -45,6 +45,39 @@ impl RemoteNodeInner {
         }) {
             log::info!("node {} status {}", self.node_id(), status_ref);
         }
+    }
+    async fn serve_all_tasks(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
+        let mut join_set: JoinSet<Result<(), CrabError>> = JoinSet::new();
+        let mut guard = self.cmd_rx.lock().await;
+        let Some(mut cmd_rx) = guard.take() else {
+            log::error!("cmd_rx is none,serve all tasks already started ?");
+            return Ok(());
+        };
+        drop(guard);
+        loop {
+            tokio::select! {
+                recv_ret=cmd_rx.recv()=>{
+                    match recv_ret {
+                        None => break,
+                        Some(task)=>{
+                            let self_clone=self.clone();
+                            let cancel=cancel.clone();
+                            join_set.spawn(async move{
+                                let mut stream=Stream::open(&self_clone.conn).await?;
+                                task.execute(cancel,&mut stream).await
+                            });
+                        }
+                    }
+                }
+                Some(join_ret)=join_set.join_next()=>{
+                    if let Err(err) = join_ret{
+                        log::error!("node {} join task failed, err={:?}", self.node_id(), err);
+                    }
+                }
+            }
+        }
+        while let Some(_) = join_set.join_next().await {}
+        Ok(())
     }
     async fn accept(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
         let (tx, rx) = mpsc::channel(32);
@@ -114,7 +147,9 @@ impl RemoteNodeInner {
         cancel: CancellationToken,
         stream: &mut Stream,
     ) -> Result<(), CrabError> {
-        self.hook.handle_stream(self.meta.deref(), cancel, stream).await
+        self.hook
+            .handle_stream(self.meta.deref(), cancel, stream)
+            .await
     }
     async fn make_heartbeat(
         self: Arc<Self>,
@@ -165,6 +200,28 @@ impl RemoteNodeInner {
             }
         }
     }
+    async fn make_first_heartbeat(&self, cancel: CancellationToken) -> Result<Stream, CrabError> {
+        let mut stream = if self.as_client() {
+            Stream::open(&self.conn).await?
+        } else {
+            Stream::accept(&self.conn).await?
+        };
+        let co = if self.as_client() {
+            self.hook
+                .heartbeat_as_client(self.meta.deref(), &mut stream)
+        } else {
+            self.hook.heartbeat(self.meta.deref(), &mut stream)
+        };
+        tokio::select! {
+            _=cancel.cancelled()=>{
+                Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
+            }
+            ret=co=>{
+                ret?;
+                Ok(stream)
+            }
+        }
+    }
 }
 pub(super) struct RemoteNode {
     inner: Arc<RemoteNodeInner>,
@@ -185,7 +242,7 @@ impl RemoteNode {
             status_rx,
             hook,
             opts,
-            cmd_rx,
+            cmd_rx: Mutex::new(Some(cmd_rx)),
         };
         let handle = Handle::new(inner.meta.clone(), inner.status_rx.clone(), cmd_tx.clone());
         (
@@ -196,29 +253,6 @@ impl RemoteNode {
         )
     }
 
-    async fn make_first_heartbeat(&self, cancel: CancellationToken) -> Result<Stream, CrabError> {
-        let mut stream = if self.as_client() {
-            Stream::open(&self.inner.conn).await?
-        } else {
-            Stream::accept(&self.inner.conn).await?
-        };
-        let co = if self.as_client() {
-            self.inner
-                .hook
-                .heartbeat_as_client(self.meta(), &mut stream)
-        } else {
-            self.inner.hook.heartbeat(self.meta(), &mut stream)
-        };
-        tokio::select! {
-            _=cancel.cancelled()=>{
-                Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
-            }
-            ret=co=>{
-                ret?;
-                Ok(stream)
-            }
-        }
-    }
     pub(super) fn meta(&self) -> &NodeMetadata {
         self.inner.meta.deref()
     }
@@ -228,7 +262,7 @@ impl Worker for RemoteNode {
     async fn serve(&self, cancel: CancellationToken) -> Result<(), CrabError> {
         let mut hb_stream = timeout(
             Duration::from_secs(self.inner.opts.first_heartbeat),
-            self.make_first_heartbeat(cancel.clone()),
+            self.inner.make_first_heartbeat(cancel.clone()),
         )
         .await
         .map_err(|_| CrabError::ErrorCode(CrabError::HEARTBEAT_TIMEOUT))??;
@@ -242,7 +276,11 @@ impl Worker for RemoteNode {
         let accept_cancel = cancel.clone();
         let accept_cancel_clone = accept_cancel.clone();
         let inner_hs = self.inner.clone();
-        let accept_handle = tokio::spawn(async move { inner_hs.accept(accept_cancel_clone).await });
+        let mut join_set = JoinSet::new();
+        join_set.spawn(async move { inner_hs.accept(accept_cancel_clone).await });
+        let inner_task = self.inner.clone();
+        let cancel_tasks = cancel.clone();
+        join_set.spawn(async move { inner_task.serve_all_tasks(cancel_tasks).await });
         loop {
             let inner_hb = self.inner.clone();
             if let Err(err) = tokio::select! {
@@ -271,9 +309,18 @@ impl Worker for RemoteNode {
                 break;
             }
         }
-        let ret = accept_handle.await?;
+        let mut r = None;
+        while let Some(ret) = join_set.join_next().await {
+            if let Err(e) = ret {
+                r.get_or_insert(e);
+            }
+        }
         self.inner.set_status(NodeStatus::Stopped);
-        ret
+        if let Some(e) = r {
+            Err(e.into())
+        } else {
+            Ok(())
+        }
     }
 }
 impl Node for RemoteNode {

@@ -204,6 +204,5 @@ pub(super) trait Hook: Send + Sync {
 pub struct Command;
 #[async_trait::async_trait]
 pub(super) trait AsyncTask: Send {
-    fn command(&self) -> Command;
-    async fn execute(&self, cmd: &Command) -> Result<(), CrabError>;
+    async fn execute(&self, _: CancellationToken, _: &mut Stream) -> Result<(), CrabError>;
 }
