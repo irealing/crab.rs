@@ -1,28 +1,31 @@
-use quinn::Connection;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use super::CrabError;
+use super::Handle;
 use super::proto::{HandshakePacket, MessageHeader, Method, Protocol, Stream};
 use crate::crab::proto::{AckMessage, Hook};
 use crate::crab::types::NodeMetadata;
+use quinn::Connection;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use tokio_util::sync::CancellationToken;
 
-pub(super) struct ProtoWrapper<S, H, P: Protocol<Handshake= S, Heartbeat= H>> {
+pub(super) struct ProtoWrapper<S, H, C, P: Protocol<Handshake = S, Heartbeat = H, Command = C>> {
     protocol: P,
 }
-impl<S, H, P> ProtoWrapper<S, H, P>
+impl<S, H, C, P> ProtoWrapper<S, H, C, P>
 where
-    P: Protocol<Handshake= S, Heartbeat= H>,
+    P: Protocol<Handshake = S, Heartbeat = H, Command = C>,
 {
     pub fn new(protocol: P) -> Self {
         Self { protocol }
     }
 }
 #[async_trait::async_trait]
-impl<S, H, P> Hook for ProtoWrapper<S, H, P>
+impl<S, H, C, P> Hook for ProtoWrapper<S, H, C, P>
 where
-    P: Protocol<Handshake= S, Heartbeat= H>,
+    P: Protocol<Handshake = S, Heartbeat = H, Command = C>,
     S: HandshakePacket + 'static,
     H: DeserializeOwned + Serialize + Sync + Send + 'static,
+    C: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
     async fn handshake(&self, conn: &Connection) -> Result<NodeMetadata, CrabError> {
         log::trace!("handshake with connection from {}", conn.remote_address());
@@ -152,5 +155,22 @@ where
                 .await?;
         }
         Ok(())
+    }
+    async fn on_node_accepted(&self, meta: &NodeMetadata, h: Handle) -> Result<(), CrabError> {
+        self.protocol.on_node_accepted(meta, h).await
+    }
+    async fn on_node_exited(&self, meta: &NodeMetadata) {
+        self.protocol.on_node_exited(meta).await
+    }
+    async fn handle_stream(
+        &self,
+        meta: &NodeMetadata,
+        cancel: CancellationToken,
+        stream: &mut Stream,
+    ) -> Result<(), CrabError> {
+        let (header, cmd) = stream.read_message::<P::Command>().await?;
+        self.protocol
+            .handle_command(cancel, meta, (&header, &cmd), stream)
+            .await
     }
 }

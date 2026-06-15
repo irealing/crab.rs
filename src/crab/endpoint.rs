@@ -12,7 +12,7 @@ use super::types::{Endpoint, NodeMetadata, Options};
 use super::wrapper::ProtoWrapper;
 use super::{CrabError, utils::crypto::TLSProvider};
 use quinn::crypto::rustls::QuicClientConfig;
-use quinn::{ClientConfig, Connecting, Connection};
+use quinn::{ClientConfig, Connection};
 use quinn::{ServerConfig, crypto::rustls::QuicServerConfig};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -43,53 +43,6 @@ type NodeTask = (RemoteNode, Option<oneshot::Sender<()>>);
 type ConnTask = (Connection, bool, Option<oneshot::Sender<()>>);
 impl LocalEndpointInner {
     const REMOTE_CONNECT_RETRY_DELAY: Duration = Duration::from_secs(10);
-    fn new<S, H, P>(
-        cfg: EndpointConfig,
-        tls: TLSProvider,
-        protocol: P,
-    ) -> Result<LocalEndpointInner, CrabError>
-    where
-        P: Protocol<Handshake = S, Heartbeat = H> + 'static,
-        S: HandshakePacket + 'static,
-        H: DeserializeOwned + Serialize + Send + Sync + 'static,
-    {
-        let server_config = ServerConfig::with_crypto(Arc::new(
-            QuicServerConfig::try_from(tls.build_server_config()?).map_err(|err| {
-                log::error!("build QUIC server config error {}", err);
-                CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
-            })?,
-        ));
-        let client_crypto_cfg = tls.build_client_config()?;
-        let client_config = ClientConfig::new(Arc::new(
-            QuicClientConfig::try_from(client_crypto_cfg).map_err(|e| {
-                log::error!("build QUIC client config error{}", e);
-                CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
-            })?,
-        ));
-        let endpoint = quinn::Endpoint::server(
-            server_config,
-            cfg.bind_address.parse().map_err(|e| {
-                log::error!("parse listen addr error {}", e);
-                CrabError::ErrorCode(CrabError::PARSE_ERROR)
-            })?,
-        )
-        .map_err(|err| {
-            log::info!("listen on {} error {}", cfg.bind_address, err);
-            err
-        })
-        .map(|e| {
-            let mut e = e;
-            e.set_default_client_config(client_config);
-            e
-        })?;
-        let local_addr = endpoint.local_addr()?;
-        Ok(LocalEndpointInner {
-            cfg,
-            endpoint,
-            local_addr,
-            hook: Arc::new(ProtoWrapper::new(protocol)),
-        })
-    }
     async fn handshake(
         self: Arc<Self>,
         conn: &quinn::Connection,
@@ -434,8 +387,43 @@ impl LocalEndpoint {
         S: HandshakePacket + 'static,
         H: DeserializeOwned + Serialize + Send + Sync + 'static,
     {
+        let server_config = ServerConfig::with_crypto(Arc::new(
+            QuicServerConfig::try_from(tls.build_server_config()?).map_err(|err| {
+                log::error!("build QUIC server config error {}", err);
+                CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
+            })?,
+        ));
+        let client_crypto_cfg = tls.build_client_config()?;
+        let client_config = ClientConfig::new(Arc::new(
+            QuicClientConfig::try_from(client_crypto_cfg).map_err(|e| {
+                log::error!("build QUIC client config error{}", e);
+                CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
+            })?,
+        ));
+        let endpoint = quinn::Endpoint::server(
+            server_config,
+            cfg.bind_address.parse().map_err(|e| {
+                log::error!("parse listen addr error {}", e);
+                CrabError::ErrorCode(CrabError::PARSE_ERROR)
+            })?,
+        )
+        .map_err(|err| {
+            log::info!("listen on {} error {}", cfg.bind_address, err);
+            err
+        })
+        .map(|e| {
+            let mut e = e;
+            e.set_default_client_config(client_config);
+            e
+        })?;
+        let local_addr = endpoint.local_addr()?;
         Ok(LocalEndpoint {
-            inner: Arc::new(LocalEndpointInner::new(cfg, tls, protocol)?),
+            inner: Arc::new(LocalEndpointInner {
+                cfg,
+                endpoint,
+                local_addr,
+                hook: Arc::new(ProtoWrapper::new(protocol)),
+            }),
         })
     }
 }
@@ -453,15 +441,16 @@ impl Endpoint for LocalEndpoint {
         self.inner.local_addr.clone()
     }
 }
-pub fn create_local_endpoint<S, H, P>(
+pub fn create_local_endpoint<S, H, C, P>(
     tls: TLSProvider,
     cfg: EndpointConfig,
     protocol: P,
 ) -> Result<impl Endpoint, CrabError>
 where
-    P: Protocol<Handshake = S, Heartbeat = H> + 'static,
+    P: Protocol<Handshake = S, Heartbeat = H, Command = C> + 'static,
     S: HandshakePacket + 'static,
     H: DeserializeOwned + Serialize + Sync + Send + 'static,
+    C: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
     LocalEndpoint::new(tls, cfg, protocol)
 }

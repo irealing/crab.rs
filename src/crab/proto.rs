@@ -7,6 +7,7 @@ use quinn::{Connection, RecvStream, SendStream};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::io::Cursor;
 use tokio_util::bytes::BytesMut;
+use tokio_util::sync::CancellationToken;
 
 #[derive(BinRead, BinWrite, Debug, PartialEq, Eq, Clone, Copy)]
 #[brw(repr = u16)]
@@ -58,29 +59,6 @@ impl AckMessage {
 const HEADER_SIZE: usize = 12;
 const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 
-pub trait HandshakePacket: DeserializeOwned + Serialize + Send + Sync {
-    fn node_id(&self) -> &str;
-}
-pub trait Protocol: Send + Sync {
-    type Handshake: HandshakePacket + 'static;
-    type Heartbeat: DeserializeOwned + Serialize + Send + Sync + 'static;
-    fn make_handshake(&self) -> Result<Self::Handshake, CrabError>;
-    fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError>;
-    fn on_handshake(
-        &self,
-        _: &NodeMetadata,
-        _: &Self::Handshake,
-    ) -> Result<Self::Handshake, CrabError> {
-        self.make_handshake()
-    }
-    fn on_heartbeat(
-        &self,
-        _: &NodeMetadata,
-        _: &Self::Heartbeat,
-    ) -> Result<Self::Heartbeat, CrabError> {
-        self.make_heartbeat()
-    }
-}
 pub struct Stream {
     pub writer: SendStream,
     pub reader: RecvStream,
@@ -153,6 +131,44 @@ impl Stream {
     }
 }
 
+pub trait HandshakePacket: DeserializeOwned + Serialize + Send + Sync {
+    fn node_id(&self) -> &str;
+}
+#[async_trait::async_trait]
+pub trait Protocol: Send + Sync {
+    type Handshake: HandshakePacket + 'static;
+    type Heartbeat: DeserializeOwned + Serialize + Send + Sync + 'static;
+    type Command: DeserializeOwned + Serialize + Send + Sync;
+    fn make_handshake(&self) -> Result<Self::Handshake, CrabError>;
+    fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError>;
+    fn on_handshake(
+        &self,
+        _: &NodeMetadata,
+        _: &Self::Handshake,
+    ) -> Result<Self::Handshake, CrabError> {
+        self.make_handshake()
+    }
+    fn on_heartbeat(
+        &self,
+        _: &NodeMetadata,
+        _: &Self::Heartbeat,
+    ) -> Result<Self::Heartbeat, CrabError> {
+        self.make_heartbeat()
+    }
+    async fn on_node_accepted(&self, _: &NodeMetadata, _: Handle) -> Result<(), CrabError> {
+        Ok(())
+    }
+    async fn on_node_exited(&self, _: &NodeMetadata) {}
+    async fn handle_command(
+        &self,
+        _: CancellationToken,
+        _: &NodeMetadata,
+        _: (&MessageHeader, &Self::Command),
+        _: &mut Stream,
+    ) -> Result<(), CrabError> {
+        Err(CrabError::ErrorCode(CrabError::UNKNOWN_ERROR))
+    }
+}
 #[async_trait::async_trait]
 pub(super) trait Hook: Send + Sync {
     async fn handshake(&self, _: &Connection) -> Result<NodeMetadata, CrabError> {
@@ -175,6 +191,14 @@ pub(super) trait Hook: Send + Sync {
     }
     async fn on_node_exited(&self, meta: &NodeMetadata) {
         log::trace!("on_node_exited {}", meta.node_id);
+    }
+    async fn handle_stream(
+        &self,
+        _: &NodeMetadata,
+        _: CancellationToken,
+        _: &mut Stream,
+    ) -> Result<(), CrabError> {
+        Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
 }
 pub struct Command;

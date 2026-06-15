@@ -111,10 +111,10 @@ impl RemoteNodeInner {
     }
     async fn handle_stream(
         self: Arc<Self>,
-        _: CancellationToken,
-        _: &mut Stream,
+        cancel: CancellationToken,
+        stream: &mut Stream,
     ) -> Result<(), CrabError> {
-        todo!()
+        self.hook.handle_stream(self.meta.deref(), cancel, stream).await
     }
     async fn make_heartbeat(
         self: Arc<Self>,
