@@ -1,9 +1,12 @@
+use super::CrabError;
 use super::Node;
-use super::proto::AsyncTask;
+use super::proto::Stream;
+use super::proto::{AsyncJob, AsyncTask};
 use super::types::{NodeMetadata, NodeStatus};
 use std::net::SocketAddr;
-use tokio::sync::{mpsc, watch};
 use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio_util::sync::CancellationToken;
 
 struct HandleInner {
     meta: Arc<NodeMetadata>,
@@ -26,6 +29,22 @@ impl Handle {
                 cmd_tx,
             }),
         }
+    }
+    async fn exec<F, T, Fut>(&self, callback: F) -> Result<T, CrabError>
+    where
+        F: FnOnce(CancellationToken, &mut Stream) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<T, CrabError>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let job = AsyncJob { callback, tx };
+        self.inner
+            .cmd_tx
+            .send(Box::new(job))
+            .await
+            .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?;
+        rx.await
+            .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?
     }
 }
 impl Clone for Handle {

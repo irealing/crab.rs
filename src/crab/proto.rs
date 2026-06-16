@@ -6,6 +6,8 @@ use bytes::BufMut;
 use quinn::{Connection, RecvStream, SendStream};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::io::Cursor;
+use std::ops::Deref;
+use tokio::sync::oneshot;
 use tokio_util::bytes::BytesMut;
 use tokio_util::sync::CancellationToken;
 
@@ -201,8 +203,36 @@ pub(super) trait Hook: Send + Sync {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
 }
-pub struct Command;
 #[async_trait::async_trait]
-pub(super) trait AsyncTask: Send {
-    async fn execute(&self, _: CancellationToken, _: &mut Stream) -> Result<(), CrabError>;
+pub(super) trait AsyncTask: Send + 'static {
+    async fn execute(
+        self: Box<Self>,
+        _: CancellationToken,
+        _: &mut Stream,
+    ) -> Result<(), CrabError>;
+}
+
+pub(super) struct AsyncJob<T, F> {
+    pub callback: F,
+    pub tx: oneshot::Sender<Result<T, CrabError>>,
+}
+#[async_trait::async_trait]
+impl<T, F, Fut> AsyncTask for AsyncJob<T, F>
+where
+    T: Send + 'static,
+    F: FnOnce(CancellationToken, &mut Stream) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<T, CrabError>> + Send + 'static,
+{
+    async fn execute(
+        self: Box<Self>,
+        c: CancellationToken,
+        stream: &mut Stream,
+    ) -> Result<(), CrabError> {
+        let this = *self;
+        let ret = (this.callback)(c, stream).await;
+        if this.tx.send(ret).is_err() {
+            log::warn!("AsyncJob receiver dropped");
+        }
+        Ok(())
+    }
 }

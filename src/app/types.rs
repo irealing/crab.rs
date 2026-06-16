@@ -1,5 +1,4 @@
-pub struct HostInfo {
-    pub hostname: String,
-    pub os_version: String,
-    pub os_build: String,
+pub struct HandshakePacket {
+    pub device_id: String,
+    pub version: String,
 }
