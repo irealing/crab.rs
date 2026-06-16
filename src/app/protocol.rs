@@ -1,7 +1,7 @@
 use super::types::{Command, Handshake};
 use async_trait::async_trait;
 use crab::proto::Protocol;
-use crab::CrabError;
+use crab::{CrabError, NodeMetadata};
 
 pub struct AppProtocol {
     device_id: String,
@@ -25,5 +25,13 @@ impl Protocol for AppProtocol {
 
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError> {
         Ok(Handshake::new(&self.device_id))
+    }
+    async fn on_handshake(
+        &self,
+        _: &NodeMetadata,
+        hs: &Self::Handshake,
+    ) -> Result<Self::Handshake, CrabError> {
+        log::info!("Handling handshake {:?}", hs);
+        self.make_handshake()
     }
 }
