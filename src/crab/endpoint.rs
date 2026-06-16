@@ -376,15 +376,9 @@ struct LocalEndpoint {
     inner: Arc<LocalEndpointInner>,
 }
 impl LocalEndpoint {
-    pub fn new<S, H, P>(
-        tls: TLSProvider,
-        cfg: EndpointConfig,
-        protocol: P,
-    ) -> Result<Self, CrabError>
+    pub fn new<P>(tls: TLSProvider, cfg: EndpointConfig, protocol: P) -> Result<Self, CrabError>
     where
-        P: Protocol<Handshake = S, Heartbeat = H> + 'static,
-        S: HandshakePacket + 'static,
-        H: DeserializeOwned + Serialize + Send + Sync + 'static,
+        P: Protocol + 'static,
     {
         let server_config = ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(tls.build_server_config()?).map_err(|err| {
@@ -437,16 +431,13 @@ impl Endpoint for LocalEndpoint {
         self.inner.local_addr.clone()
     }
 }
-pub fn create_local_endpoint<S, H, C, P>(
+pub fn create_local_endpoint<P>(
     tls: TLSProvider,
     cfg: EndpointConfig,
     protocol: P,
 ) -> Result<impl Endpoint, CrabError>
 where
-    P: Protocol<Handshake = S, Heartbeat = H, Command = C> + 'static,
-    S: HandshakePacket + 'static,
-    H: DeserializeOwned + Serialize + Sync + Send + 'static,
-    C: DeserializeOwned + Serialize + Sync + Send + 'static,
+    P: Protocol + 'static,
 {
     LocalEndpoint::new(tls, cfg, protocol)
 }

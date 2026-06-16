@@ -2,10 +2,11 @@ use std::{fs, str::FromStr};
 
 use serde::Deserialize;
 
-use crate::crab::{CrabError, EndpointConfig, utils::crypto::Config as TLSConfig};
+use crab::{CrabError, EndpointConfig, utils::crypto::Config as TLSConfig};
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
+    pub node_id: String,
     pub endpoint: EndpointConfig,
     pub tls: TLSConfig,
 }

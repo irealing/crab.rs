@@ -1,38 +1,29 @@
-use crate::crab::CrabError;
-use crate::crab::proto::{HandshakePacket, Protocol};
-use serde::{Deserialize, Serialize};
+use super::types::{Command, Handshake};
+use async_trait::async_trait;
+use crab::proto::Protocol;
+use crab::CrabError;
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct HandshakePayload {
-    pub node_id: String,
+pub struct AppProtocol {
+    device_id: String,
 }
-impl HandshakePacket for HandshakePayload {
-    fn node_id(&self) -> &str {
-        &self.node_id
+impl AppProtocol {
+    pub fn new(device_id: &str) -> Self {
+        Self {
+            device_id: device_id.to_string(),
+        }
     }
 }
+#[async_trait]
+impl Protocol for AppProtocol {
+    type Handshake = Handshake;
+    type Heartbeat = Handshake;
 
-pub struct SimpleProtocol;
-impl SimpleProtocol {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Protocol for SimpleProtocol {
-    type Handshake = HandshakePayload;
-    type Heartbeat = HandshakePayload;
-
-    type Command = ();
+    type Command = Command;
     fn make_handshake(&self) -> Result<Self::Handshake, CrabError> {
-        Ok(HandshakePayload {
-            node_id: "1234".to_string(),
-        })
+        Ok(Handshake::new(&self.device_id))
     }
 
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError> {
-        Ok(HandshakePayload {
-            node_id: "1234".to_string(),
-        })
+        Ok(Handshake::new(&self.device_id))
     }
 }

@@ -7,25 +7,35 @@ use quinn::Connection;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio_util::sync::CancellationToken;
-
-pub(super) struct ProtoWrapper<S, H, C, P: Protocol<Handshake = S, Heartbeat = H, Command = C>> {
+pub(super) struct ProtoWrapper<P: Protocol> {
     protocol: P,
 }
-impl<S, H, C, P> ProtoWrapper<S, H, C, P>
+impl<P> ProtoWrapper<P>
 where
-    P: Protocol<Handshake = S, Heartbeat = H, Command = C>,
+    P: Protocol,
+    P::Handshake: HandshakePacket + 'static,
+    P::Heartbeat: DeserializeOwned + Serialize + Sync + Send + 'static,
+    P::Command: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
     pub fn new(protocol: P) -> Self {
         Self { protocol }
     }
+    async fn handle_heartbeat(
+        &self,
+        meta: &NodeMetadata,
+        stream: &mut Stream,
+    ) -> Result<P::Heartbeat, CrabError> {
+        let (_, body) = stream.read_message().await?;
+        self.protocol.on_heartbeat(meta, &body).await
+    }
 }
 #[async_trait::async_trait]
-impl<S, H, C, P> Hook for ProtoWrapper<S, H, C, P>
+impl<P> Hook for ProtoWrapper<P>
 where
-    P: Protocol<Handshake = S, Heartbeat = H, Command = C>,
-    S: HandshakePacket + 'static,
-    H: DeserializeOwned + Serialize + Sync + Send + 'static,
-    C: DeserializeOwned + Serialize + Sync + Send + 'static,
+    P: Protocol,
+    P::Handshake: HandshakePacket + 'static,
+    P::Heartbeat: DeserializeOwned + Serialize + Sync + Send + 'static,
+    P::Command: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
     async fn handshake(&self, conn: &Connection) -> Result<NodeMetadata, CrabError> {
         log::trace!("handshake with connection from {}", conn.remote_address());
@@ -47,7 +57,7 @@ where
             remote_addr: conn.remote_address(),
             as_client: true,
         };
-        match self.protocol.on_handshake(&meta, &handshake) {
+        match self.protocol.on_handshake(&meta, &handshake).await {
             Err(err) => {
                 session
                     .write_error(Method::Handshake, MessageHeader::OPTION_ERROR, &err)
@@ -91,13 +101,11 @@ where
         Ok(meta)
     }
     async fn heartbeat(&self, meta: &NodeMetadata, stream: &mut Stream) -> Result<(), CrabError> {
-        match stream
-            .read_message::<P::Heartbeat>()
+        match self
+            .handle_heartbeat(meta, stream)
             .await
-            .and_then(|(_, body)| {
-                self.protocol.on_heartbeat(&meta, &body)?;
-                self.protocol.make_heartbeat()
-            }) {
+            .and_then(|_| self.protocol.make_heartbeat())
+        {
             Err(err) => {
                 stream
                     .write_error(Method::Heartbeat, MessageHeader::OPTION_ERROR, &err)
@@ -134,10 +142,7 @@ where
                     .await?
             }
         }
-        let handshake_ret = stream
-            .read_message::<P::Heartbeat>()
-            .await
-            .and_then(|(_, body)| self.protocol.on_heartbeat(meta, &body));
+        let handshake_ret = self.handle_heartbeat(meta, stream).await;
         if let Err(err) = handshake_ret {
             stream
                 .write_error(Method::Heartbeat, MessageHeader::OPTION_ERROR, &err)

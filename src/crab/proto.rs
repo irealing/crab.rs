@@ -140,17 +140,17 @@ pub trait HandshakePacket: DeserializeOwned + Serialize + Send + Sync {
 pub trait Protocol: Send + Sync {
     type Handshake: HandshakePacket + 'static;
     type Heartbeat: DeserializeOwned + Serialize + Send + Sync + 'static;
-    type Command: DeserializeOwned + Serialize + Send + Sync;
+    type Command: DeserializeOwned + Serialize + Send + Sync + 'static;
     fn make_handshake(&self) -> Result<Self::Handshake, CrabError>;
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError>;
-    fn on_handshake(
+    async fn on_handshake(
         &self,
         _: &NodeMetadata,
         _: &Self::Handshake,
     ) -> Result<Self::Handshake, CrabError> {
         self.make_handshake()
     }
-    fn on_heartbeat(
+    async fn on_heartbeat(
         &self,
         _: &NodeMetadata,
         _: &Self::Heartbeat,
