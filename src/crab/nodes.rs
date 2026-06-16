@@ -21,7 +21,7 @@ struct RemoteNodeInner {
     status_rx: watch::Receiver<NodeStatus>,
     hook: Arc<dyn Hook>,
     opts: Options,
-    cmd_rx: Mutex<Option<mpsc::Receiver<Box<dyn AsyncTask>>>>,
+    task_rx: Mutex<Option<mpsc::Receiver<Box<dyn AsyncTask>>>>,
 }
 impl RemoteNodeInner {
     fn node_id(&self) -> &str {
@@ -48,17 +48,20 @@ impl RemoteNodeInner {
     }
     async fn serve_all_tasks(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
         let mut join_set: JoinSet<Result<(), CrabError>> = JoinSet::new();
-        let mut guard = self.cmd_rx.lock().await;
-        let Some(mut cmd_rx) = guard.take() else {
+        let mut guard = self.task_rx.lock().await;
+        let Some(mut task_rx) = guard.take() else {
             log::error!("cmd_rx is none,serve all tasks already started ?");
             return Ok(());
         };
         drop(guard);
         loop {
             tokio::select! {
-                recv_ret=cmd_rx.recv()=>{
+                recv_ret=task_rx.recv()=>{
                     match recv_ret {
-                        None => break,
+                        None => {
+                            log::trace!("node {}({}) cmd receiver return none,break",self.node_id(),self.meta.remote_addr);
+                            break
+                        },
                         Some(task)=>{
                             let self_clone=self.clone();
                             let cancel=cancel.clone();
@@ -76,7 +79,12 @@ impl RemoteNodeInner {
                 }
             }
         }
-        while let Some(_) = join_set.join_next().await {}
+        while let Some(ret) = join_set.join_next().await {
+            if let Err(err) = ret {
+                log::error!("node {} join task failed, err={:}", self.node_id(), err);
+            }
+        }
+        log::info!("node {} all async task done.", self.node_id());
         Ok(())
     }
     async fn accept(self: Arc<Self>, cancel: CancellationToken) -> Result<(), CrabError> {
@@ -242,7 +250,7 @@ impl RemoteNode {
             status_rx,
             hook,
             opts,
-            cmd_rx: Mutex::new(Some(cmd_rx)),
+            task_rx: Mutex::new(Some(cmd_rx)),
         };
         let handle = Handle::new(inner.meta.clone(), inner.status_rx.clone(), cmd_tx.clone());
         (
