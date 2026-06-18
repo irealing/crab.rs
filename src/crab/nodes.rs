@@ -77,8 +77,13 @@ impl RemoteNodeInner {
                         log::error!("node {} join task failed, err={:?}", self.node_id(), err);
                     }
                 }
+                _=cancel.cancelled()=>{
+                    log::debug!("node {} cancel listen tasks", self.node_id());
+                    break
+                }
             }
         }
+        drop(task_rx);
         while let Some(ret) = join_set.join_next().await {
             if let Err(err) = ret {
                 log::error!("node {} join task failed, err={:}", self.node_id(), err);
