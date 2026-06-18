@@ -222,11 +222,7 @@ pub(super) trait Hook: Send + Sync {
 }
 #[async_trait::async_trait]
 pub(super) trait AsyncTask: Send + 'static {
-    async fn execute(
-        self: Box<Self>,
-        _: CancellationToken,
-        _: &mut Stream,
-    ) -> Result<(), CrabError>;
+    async fn execute(self: Box<Self>, _: CancellationToken, _: Stream) -> Result<(), CrabError>;
 }
 
 pub(super) struct AsyncJob<T, F> {
@@ -237,13 +233,13 @@ pub(super) struct AsyncJob<T, F> {
 impl<T, F, Fut> AsyncTask for AsyncJob<T, F>
 where
     T: Send + 'static,
-    F: FnOnce(CancellationToken, &mut Stream) -> Fut + Send + Sync + 'static,
+    F: FnOnce(CancellationToken, Stream) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<T, CrabError>> + Send + 'static,
 {
     async fn execute(
         self: Box<Self>,
         c: CancellationToken,
-        stream: &mut Stream,
+        stream: Stream,
     ) -> Result<(), CrabError> {
         let this = *self;
         let ret = (this.callback)(c, stream).await;

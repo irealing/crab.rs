@@ -66,8 +66,8 @@ impl RemoteNodeInner {
                             let self_clone=self.clone();
                             let cancel=cancel.clone();
                             join_set.spawn(async move{
-                                let mut stream=Stream::open(&self_clone.conn).await?;
-                                task.execute(cancel,&mut stream).await
+                                let  stream=Stream::open(&self_clone.conn).await?;
+                                task.execute(cancel,stream).await
                             });
                         }
                     }
