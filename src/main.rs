@@ -3,6 +3,7 @@ use std::{process::ExitCode, sync::Arc};
 
 use tokio_util::sync::CancellationToken;
 
+use app::Manager;
 use app::{config, protocol};
 use crab::utils::crypto::TLSProvider;
 use crab::{
@@ -30,7 +31,8 @@ async fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 async fn start(cfg: config::Config) -> Result<(), CrabError> {
-    let proto = protocol::AppProtocol::new(&cfg.node_id);
+    let manager = Manager::new();
+    let proto = protocol::AppProtocol::new(&cfg.node_id, manager);
     let local_node = Arc::new(create_local_endpoint(
         TLSProvider::from_config(cfg.tls),
         cfg.endpoint,

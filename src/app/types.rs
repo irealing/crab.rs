@@ -54,4 +54,5 @@ impl Handshake {
 #[derive(Deserialize, Serialize, Debug)]
 pub enum Command {
     Ping,
+    Pong,
 }

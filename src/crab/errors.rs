@@ -36,6 +36,7 @@ impl CrabError {
     pub const HEARTBEAT_TIMEOUT: u32 = 18;
     pub const CONN_HANDSHAKE_ERROR: u32 = 19;
     pub const NODE_ALREADY_EXIT: u32 = 20;
+    pub const NODE_EXISTS: u32 = 21;
     pub const ILLEGAL_ERROR: u32 = 0xffff_fffe;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
 
@@ -64,6 +65,7 @@ impl CrabError {
                 Self::CONN_HANDSHAKE_ERROR => "Connection handshake error",
                 Self::NODE_ALREADY_EXIT => "Node already exited",
                 Self::ILLEGAL_ERROR => "Illegal error",
+                Self::UNKNOWN_ERROR => "Unknown error",
                 _ => "Unknown error code",
             },
             _ => "",
