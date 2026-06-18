@@ -1,8 +1,9 @@
 use super::types::{Command, Handshake};
 use crate::app::manager::Manager;
 use async_trait::async_trait;
-use crab::proto::Protocol;
+use crab::proto::{MessageHeader, Protocol, Stream};
 use crab::{CrabError, Handle, NodeMetadata};
+use tokio_util::sync::CancellationToken;
 
 pub struct AppProtocol {
     device_id: String,
@@ -57,5 +58,20 @@ impl Protocol for AppProtocol {
     }
     async fn on_node_exited(&self, meta: &NodeMetadata) {
         self.manager.remove(&meta.node_id)
+    }
+    async fn handle_command(
+        &self,
+        _: CancellationToken,
+        _: &NodeMetadata,
+        (header, cmd): (&MessageHeader, &Self::Command),
+        stream: &mut Stream,
+    ) -> Result<(), CrabError> {
+        let resp = match cmd {
+            Command::Ping => Command::Pong,
+            Command::Pong => Command::Ping,
+        };
+        stream
+            .write_message(header.method, header.option, &resp)
+            .await
     }
 }

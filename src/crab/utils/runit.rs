@@ -7,42 +7,30 @@ pub trait Worker: Send + Sync {
     async fn serve(&self, token: CancellationToken) -> Result<(), CrabError>;
 }
 
-struct WorkerGroup {
-    workers: Vec<Arc<dyn Worker>>,
-}
-impl WorkerGroup {
-    fn new(workers: Vec<Arc<dyn Worker>>) -> Self {
-        Self { workers }
-    }
-}
-pub fn worker_group(workers: Vec<Arc<dyn Worker>>) -> impl Worker {
-    WorkerGroup::new(workers)
-}
-
 #[async_trait::async_trait]
-impl Worker for WorkerGroup {
+impl Worker for Vec<Arc<dyn Worker>> {
     async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
         let mut join_set = JoinSet::new();
-        for worker in &self.workers {
+        let token = token.child_token();
+        for worker in self {
             let worker = worker.clone();
             let token = token.clone();
             join_set.spawn(async move { worker.serve(token).await });
         }
-        let mut first_err = None;
+        let mut first_err: Option<CrabError> = None;
         while let Some(res) = join_set.join_next().await {
             match res {
-                Err(e) => {
-                    log::warn!("Worker task failed: {}", e);
-                    token.cancel();
-                    first_err.get_or_insert(CrabError::ErrorCode(CrabError::ASYNC_RUNTIME_ERROR));
-                }
                 Ok(Err(e)) => {
                     token.cancel();
+                    log::warn!("Worker task failed: {}", e);
                     first_err.get_or_insert(e);
                 }
-                _ => {
-                    continue;
+                Err(e) => {
+                    token.cancel();
+                    log::warn!("Worker task failed: {}", e);
+                    first_err.get_or_insert(e.into());
                 }
+                Ok(Ok(_)) => continue,
             }
         }
         if let Some(err) = first_err {
@@ -52,7 +40,6 @@ impl Worker for WorkerGroup {
         }
     }
 }
-
 pub struct WaitExitWorker {
     workers: Vec<Arc<dyn Worker>>,
 }
@@ -64,10 +51,9 @@ impl WaitExitWorker {
 #[async_trait::async_trait]
 impl Worker for WaitExitWorker {
     async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
-        let workers = self.workers.iter().cloned().collect::<Vec<_>>();
         let cancel_all = token.clone();
         let _ = tokio::spawn(async move { wait_exit(cancel_all).await });
-        worker_group(workers).serve(token).await
+        self.workers.serve(token).await
     }
 }
 #[cfg(test)]
@@ -79,7 +65,7 @@ mod tests {
 
     use crate::crab::CrabError;
 
-    use super::{Worker, worker_group};
+    use super::Worker;
     struct LocalWorker(u64);
     #[async_trait::async_trait]
     impl Worker for LocalWorker {
@@ -102,14 +88,12 @@ mod tests {
     }
     #[tokio::test]
     async fn test_worker_error() {
-        worker_group(vec![
+        let workers: Vec<Arc<dyn Worker>> = vec![
             Arc::new(LocalWorker(3)),
             Arc::new(LocalWorker(10)),
             Arc::new(LocalWorker(20)),
-        ])
-        .serve(CancellationToken::new())
-        .await
-        .unwrap_err();
+        ];
+        workers.serve(CancellationToken::new()).await.unwrap_err();
     }
 }
 #[cfg(windows)]
