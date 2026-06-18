@@ -1,12 +1,12 @@
 use super::{CrabError, Handle, NodeMetadata};
 use bincode_next::config;
 use bincode_next::serde::{decode_from_slice, encode_into_std_write};
-use binrw::{BinRead, BinWrite, binrw};
+use binrw::{binrw, BinRead, BinWrite};
 use bytes::BufMut;
 use quinn::{Connection, RecvStream, SendStream};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::any::Any;
 use std::io::Cursor;
-use std::ops::Deref;
 use tokio::sync::oneshot;
 use tokio_util::bytes::BytesMut;
 use tokio_util::sync::CancellationToken;
@@ -157,7 +157,12 @@ pub trait Protocol: Send + Sync {
     ) -> Result<Self::Heartbeat, CrabError> {
         self.make_heartbeat()
     }
-    async fn on_node_accepted(&self, _: &NodeMetadata, _: Handle) -> Result<(), CrabError> {
+    async fn on_node_accepted(
+        &self,
+        _: &NodeMetadata,
+        _: Handle,
+        _: Self::Handshake,
+    ) -> Result<(), CrabError> {
         Ok(())
     }
     async fn on_node_exited(&self, _: &NodeMetadata) {}
@@ -173,10 +178,16 @@ pub trait Protocol: Send + Sync {
 }
 #[async_trait::async_trait]
 pub(super) trait Hook: Send + Sync {
-    async fn handshake(&self, _: &Connection) -> Result<NodeMetadata, CrabError> {
+    async fn handshake(
+        &self,
+        _: &Connection,
+    ) -> Result<(NodeMetadata, Box<dyn Any + Send>), CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
-    async fn handshake_as_client(&self, _: &Connection) -> Result<NodeMetadata, CrabError> {
+    async fn handshake_as_client(
+        &self,
+        _: &Connection,
+    ) -> Result<(NodeMetadata, Box<dyn Any + Send>), CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }
     async fn heartbeat(&self, _: &NodeMetadata, _: &mut Stream) -> Result<(), CrabError> {
@@ -188,7 +199,12 @@ pub(super) trait Hook: Send + Sync {
     async fn on_connection_accepted(&self, _: &Connection) -> Result<(), CrabError> {
         Ok(())
     }
-    async fn on_node_accepted(&self, _: &NodeMetadata, _: Handle) -> Result<(), CrabError> {
+    async fn on_node_accepted(
+        &self,
+        _: &NodeMetadata,
+        _: Handle,
+        _: Box<dyn Any + Send>,
+    ) -> Result<(), CrabError> {
         Ok(())
     }
     async fn on_node_exited(&self, meta: &NodeMetadata) {

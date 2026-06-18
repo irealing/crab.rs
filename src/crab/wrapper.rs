@@ -6,6 +6,7 @@ use crate::crab::types::NodeMetadata;
 use quinn::Connection;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use std::any::Any;
 use tokio_util::sync::CancellationToken;
 pub(super) struct ProtoWrapper<P: Protocol> {
     protocol: P,
@@ -37,7 +38,10 @@ where
     P::Heartbeat: DeserializeOwned + Serialize + Sync + Send + 'static,
     P::Command: DeserializeOwned + Serialize + Sync + Send + 'static,
 {
-    async fn handshake(&self, conn: &Connection) -> Result<NodeMetadata, CrabError> {
+    async fn handshake(
+        &self,
+        conn: &Connection,
+    ) -> Result<(NodeMetadata, Box<dyn Any + Send>), CrabError> {
         log::trace!("handshake with connection from {}", conn.remote_address());
         let mut session = Stream::accept(conn).await?;
         let (header, handshake) = session.read_message::<P::Handshake>().await.map_err(|e| {
@@ -72,12 +76,15 @@ where
                     log::error!("write handshake message failed {:}", err);
                     Err(CrabError::ErrorCode(CrabError::IO_BAD_MESSAGE))
                 } else {
-                    Ok(meta)
+                    Ok((meta, Box::new(handshake)))
                 }
             }
         }
     }
-    async fn handshake_as_client(&self, conn: &Connection) -> Result<NodeMetadata, CrabError> {
+    async fn handshake_as_client(
+        &self,
+        conn: &Connection,
+    ) -> Result<(NodeMetadata, Box<dyn Any + Send>), CrabError> {
         log::trace!(
             "handshake_as_client with connection {}",
             conn.remote_address()
@@ -98,7 +105,7 @@ where
             remote_addr: conn.remote_address(),
             as_client: false,
         };
-        Ok(meta)
+        Ok((meta, Box::new(body)))
     }
     async fn heartbeat(&self, meta: &NodeMetadata, stream: &mut Stream) -> Result<(), CrabError> {
         match self
@@ -161,8 +168,18 @@ where
         }
         Ok(())
     }
-    async fn on_node_accepted(&self, meta: &NodeMetadata, h: Handle) -> Result<(), CrabError> {
-        self.protocol.on_node_accepted(meta, h).await
+    async fn on_node_accepted(
+        &self,
+        meta: &NodeMetadata,
+        h: Handle,
+        extra: Box<dyn Any + Send>,
+    ) -> Result<(), CrabError> {
+        let Ok(handshake_ret) = extra.downcast::<P::Handshake>() else {
+            return Err(CrabError::ErrorCode(CrabError::ILLEGAL_ERROR));
+        };
+        self.protocol
+            .on_node_accepted(meta, h, *handshake_ret)
+            .await
     }
     async fn on_node_exited(&self, meta: &NodeMetadata) {
         self.protocol.on_node_exited(meta).await

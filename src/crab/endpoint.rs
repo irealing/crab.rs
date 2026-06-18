@@ -1,4 +1,5 @@
 use super::{Node, utils};
+use std::any::Any;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,15 +8,14 @@ use super::utils::runit::Worker;
 
 use super::Handle;
 use super::nodes::RemoteNode;
-use super::proto::{HandshakePacket, Hook, Protocol};
+use super::proto::{Hook, Protocol};
 use super::types::{Endpoint, NodeMetadata, Options};
 use super::wrapper::ProtoWrapper;
 use super::{CrabError, utils::crypto::TLSProvider};
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig, Connection};
 use quinn::{ServerConfig, crypto::rustls::QuicServerConfig};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tokio::{sync::mpsc, task::JoinSet, time};
@@ -46,7 +46,7 @@ impl LocalEndpointInner {
         self: Arc<Self>,
         conn: &Connection,
         as_client: bool,
-    ) -> Result<NodeMetadata, CrabError> {
+    ) -> Result<(NodeMetadata, Box<dyn Any + Send>), CrabError> {
         if as_client {
             log::debug!("handshake with connection from {}", conn.remote_address());
             self.hook.handshake_as_client(&conn).await
@@ -63,7 +63,7 @@ impl LocalEndpointInner {
         conn: Connection,
         cancel: CancellationToken,
         as_client: bool,
-    ) -> Result<(RemoteNode, Handle), CrabError> {
+    ) -> Result<(RemoteNode, Handle, Box<dyn Any + Send>), CrabError> {
         let remote_addr = conn.remote_address();
         log::debug!("handshake with timeout remote address {}", remote_addr);
         let timeout = Duration::from_secs(self.cfg.options.handshake_timeout);
@@ -78,12 +78,11 @@ impl LocalEndpointInner {
                 Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
             }
         } {
-            Ok(ret) => Ok(RemoteNode::new(
-                ret,
-                conn,
-                self.hook.clone(),
-                self.cfg.options,
-            )),
+            Ok((meta, extra_data)) => {
+                let (node, handle) =
+                    RemoteNode::new(meta, conn, self.hook.clone(), self.cfg.options);
+                Ok((node, handle, extra_data))
+            }
             Err(err) => Err(err),
         }
     }
@@ -154,8 +153,8 @@ impl LocalEndpointInner {
                                     log::warn!("connection from {} is blocked,error {}",conn.remote_address(),e);
                                     e
                                 })?;
-                                let (node,handle)=self_clone.handshake_with_timeout(conn, cancel_clone,as_client).await?;
-                                hook.on_node_accepted(node.meta(),handle).await?;
+                                let (node,handle,extra_data)=self_clone.handshake_with_timeout(conn, cancel_clone,as_client).await?;
+                                hook.on_node_accepted(node.meta(),handle,extra_data).await?;
                                 Ok((node,notify))
                             });
                         }
