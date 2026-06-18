@@ -30,10 +30,10 @@ impl Handle {
             }),
         }
     }
-    async fn exec<F, T, Fut>(&self, callback: F) -> Result<T, CrabError>
+    pub async fn exec<F, T, Fut>(&self, callback: F) -> Result<T, CrabError>
     where
-        F: FnOnce(CancellationToken, &mut Stream) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<T, CrabError>> + Send + 'static,
+        F: FnOnce(CancellationToken, &mut Stream) -> Fut + Send + Sync+'static,
+        Fut: Future<Output = Result<T, CrabError>> + Send+'static,
         T: Send + 'static,
     {
         let (tx, rx) = oneshot::channel();

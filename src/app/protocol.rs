@@ -1,3 +1,5 @@
+mod base;
+
 use super::types::{Command, Handshake};
 use crate::app::manager::Manager;
 use async_trait::async_trait;

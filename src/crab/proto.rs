@@ -1,10 +1,10 @@
 use super::{CrabError, Handle, NodeMetadata};
 use bincode_next::config;
 use bincode_next::serde::{decode_from_slice, encode_into_std_write};
-use binrw::{binrw, BinRead, BinWrite};
+use binrw::{BinRead, BinWrite, binrw};
 use bytes::BufMut;
 use quinn::{Connection, RecvStream, SendStream};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::any::Any;
 use std::io::Cursor;
 use tokio::sync::oneshot;
@@ -19,6 +19,7 @@ pub enum Method {
     Heartbeat = 1,
     Ack = 2,
     Error = 3,
+    Command = 4,
 }
 #[binrw]
 #[brw(little)]
