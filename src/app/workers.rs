@@ -1,7 +1,5 @@
-use axum::Router;
-use crab::utils::runit::Worker;
+mod endpoint;
+mod workers;
 
-pub trait ApiWorker: Worker {
-    fn routers(&self) -> Router;
-    fn tag(&self) -> &str;
-}
+pub use endpoint::EndpointApiWorker;
+pub use workers::{ApiWorker,BaseApiWorker};

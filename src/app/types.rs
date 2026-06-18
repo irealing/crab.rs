@@ -18,7 +18,7 @@ pub struct HostInfo {
 pub struct DiskInfo {
     pub path: String,
     pub size: u64,
-    pub used: u64,
+    pub free: u64,
 }
 impl HostInfo {
     const UNKNOWN: &str = "unknown";
@@ -32,7 +32,7 @@ impl HostInfo {
                 .map(|x| DiskInfo {
                     path: x.mount_point().to_string_lossy().to_string(),
                     size: x.total_space(),
-                    used: x.available_space(),
+                    free: x.available_space(),
                 })
                 .collect(),
         }

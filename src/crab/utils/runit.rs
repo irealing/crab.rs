@@ -41,11 +41,11 @@ impl Worker for Vec<Arc<dyn Worker>> {
     }
 }
 pub struct WaitExitWorker {
-    workers: Vec<Arc<dyn Worker>>,
+    worker: Box<dyn Worker>,
 }
 impl WaitExitWorker {
-    pub fn new(workers: Vec<Arc<dyn Worker>>) -> Self {
-        Self { workers }
+    pub fn new(worker: Box<dyn Worker>) -> Self {
+        Self { worker }
     }
 }
 #[async_trait::async_trait]
@@ -53,7 +53,7 @@ impl Worker for WaitExitWorker {
     async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
         let cancel_all = token.clone();
         let _ = tokio::spawn(async move { wait_exit(cancel_all).await });
-        self.workers.serve(token).await
+        self.worker.serve(token).await
     }
 }
 #[cfg(test)]

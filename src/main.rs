@@ -3,6 +3,8 @@ use std::{process::ExitCode, sync::Arc};
 
 use tokio_util::sync::CancellationToken;
 
+use crate::app::workers;
+use crate::app::workers::EndpointApiWorker;
 use app::Manager;
 use app::{config, protocol};
 use crab::utils::crypto::TLSProvider;
@@ -31,6 +33,10 @@ async fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 async fn start(cfg: config::Config) -> Result<(), CrabError> {
+    let api_worker = workers::BaseApiWorker(
+        cfg.endpoint.bind_address.clone(),
+        vec![Arc::new(EndpointApiWorker::new())],
+    );
     let manager = Manager::new();
     let proto = protocol::AppProtocol::new(&cfg.node_id, manager);
     let local_node = Arc::new(create_local_endpoint(
@@ -38,8 +44,8 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
         cfg.endpoint,
         proto,
     )?);
-    let workers: Vec<Arc<dyn Worker>> = vec![local_node as Arc<dyn Worker>];
-    WaitExitWorker::new(workers)
+    let worker = vec![local_node as Arc<dyn Worker>, Arc::new(api_worker)];
+    WaitExitWorker::new(Box::new(worker))
         .serve(CancellationToken::new())
         .await
 }
