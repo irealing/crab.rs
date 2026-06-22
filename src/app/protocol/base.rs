@@ -1,6 +1,26 @@
-use crab::CrabError;
+use crate::app::types::Command;
+use crab::proto::{Method, Stream};
+use crab::{CrabError, Handle};
+use tokio_util::sync::CancellationToken;
 
 #[async_trait::async_trait]
 pub trait CommandExecutor {
-    async fn ping(self) -> Result<(), CrabError>;
+    async fn ping(&self) -> Result<(), CrabError>;
+}
+#[async_trait::async_trait]
+impl CommandExecutor for Handle {
+    async fn ping(&self) -> Result<(), CrabError> {
+        self.exec(async |_: CancellationToken, mut stream: Stream| {
+            stream
+                .write_message(Method::Command, 0, &Command::Ping)
+                .await?;
+            let (_, ret) = stream.read_message::<Command>().await?;
+            if ret == Command::Pong {
+                Ok(())
+            } else {
+                Err(CrabError::ErrorCode(CrabError::UNEXCEPTED_RESPONSE))
+            }
+        })
+        .await
+    }
 }

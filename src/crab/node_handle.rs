@@ -1,12 +1,11 @@
-use super::CrabError;
-use super::Node;
-use super::proto::Stream;
 use super::proto::{AsyncJob, AsyncTask};
 use super::types::{NodeMetadata, NodeStatus};
+use super::CrabError;
+use super::Node;
+use crate::proto::Executor;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
-use tokio_util::sync::CancellationToken;
 
 struct HandleInner {
     meta: Arc<NodeMetadata>,
@@ -30,10 +29,9 @@ impl Handle {
             }),
         }
     }
-    pub async fn exec<F, T, Fut>(&self, callback: F) -> Result<T, CrabError>
+    pub async fn exec<CE, T>(&self, callback: CE) -> Result<T, CrabError>
     where
-        F: FnOnce(CancellationToken, Stream) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<T, CrabError>> + Send + 'static,
+        CE: Executor<T>,
         T: Send + 'static,
     {
         let (tx, rx) = oneshot::channel();

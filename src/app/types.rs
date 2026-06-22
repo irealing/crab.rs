@@ -51,7 +51,7 @@ impl Handshake {
         }
     }
 }
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, PartialEq)]
 pub enum Command {
     Ping,
     Pong,

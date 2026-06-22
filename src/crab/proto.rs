@@ -225,16 +225,23 @@ pub(super) trait AsyncTask: Send + 'static {
     async fn execute(self: Box<Self>, _: CancellationToken, _: Stream) -> Result<(), CrabError>;
 }
 
-pub(super) struct AsyncJob<T, F> {
-    pub callback: F,
+#[async_trait::async_trait]
+pub trait Executor<T>: Send + 'static
+where
+    T: Send + 'static,
+{
+    async fn execute(self, _: CancellationToken, _: Stream) -> Result<T, CrabError>;
+}
+
+pub(super) struct AsyncJob<T, CE> {
+    pub callback: CE,
     pub tx: oneshot::Sender<Result<T, CrabError>>,
 }
 #[async_trait::async_trait]
-impl<T, F, Fut> AsyncTask for AsyncJob<T, F>
+impl<T, CE> AsyncTask for AsyncJob<T, CE>
 where
     T: Send + 'static,
-    F: FnOnce(CancellationToken, Stream) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<T, CrabError>> + Send + 'static,
+    CE: Executor<T>,
 {
     async fn execute(
         self: Box<Self>,
@@ -242,10 +249,21 @@ where
         stream: Stream,
     ) -> Result<(), CrabError> {
         let this = *self;
-        let ret = (this.callback)(c, stream).await;
+        let ret = this.callback.execute(c, stream).await;
         if this.tx.send(ret).is_err() {
             log::warn!("AsyncJob receiver dropped");
         }
         Ok(())
+    }
+}
+#[async_trait::async_trait]
+impl<F, Fut, T> Executor<T> for F
+where
+    F: FnOnce(CancellationToken, Stream) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<T, CrabError>> + Send + 'static,
+    T: Send + 'static,
+{
+    async fn execute(self, c: CancellationToken, stream: Stream) -> Result<T, CrabError> {
+        self(c, stream).await
     }
 }
