@@ -20,7 +20,7 @@ impl ApiWorker for EndpointApiWorker {
 }
 #[async_trait::async_trait]
 impl Worker for EndpointApiWorker {
-    async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
+    async fn serve(&self, _: CancellationToken) -> Result<(), CrabError> {
         Ok(())
     }
 }

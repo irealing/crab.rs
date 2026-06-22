@@ -40,7 +40,13 @@ impl CrabError {
     pub const UNEXCEPTED_RESPONSE: u32 = 22;
     pub const ILLEGAL_ERROR: u32 = 0xffff_fffe;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
-
+    pub fn err_no(&self) -> u32 {
+        if let CrabError::ErrorCode(o) = self {
+            *o
+        } else {
+            Self::UNKNOWN_ERROR
+        }
+    }
     fn error_message(&self) -> &'static str {
         match self {
             CrabError::ErrorCode(code) => match *code {

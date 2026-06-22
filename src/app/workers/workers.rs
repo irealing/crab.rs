@@ -9,7 +9,6 @@ pub trait ApiWorker: Worker {
     fn routers(&self) -> Router;
     fn tag(&self) -> &str;
 }
-
 struct HttpWorker {
     app: Router,
     bind_address: String,
