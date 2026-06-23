@@ -10,13 +10,6 @@ pub struct Ret<D: Serialize> {
     pub data: Option<D>,
 }
 impl<D: Serialize> Ret<D> {
-    pub fn success(data: Option<D>) -> Self {
-        Self {
-            err_no: CrabError::NO_ERROR,
-            msg: "success".to_string(),
-            data,
-        }
-    }
     pub fn error(e: CrabError) -> Self {
         Self {
             msg: e.to_string(),
@@ -25,6 +18,19 @@ impl<D: Serialize> Ret<D> {
         }
     }
 }
+impl<T> From<T> for Ret<T>
+where
+    T: Serialize,
+{
+    fn from(t: T) -> Self {
+        Self {
+            err_no: CrabError::NO_ERROR,
+            msg: "success".to_string(),
+            data: Some(t),
+        }
+    }
+}
+
 impl<T> IntoResponse for Ret<T>
 where
     T: Serialize,
@@ -39,7 +45,7 @@ where
 {
     fn from(value: Result<T, CrabError>) -> Self {
         match value {
-            Ok(val) => Ret::success(Some(val)),
+            Ok(val) => val.into(),
             Err(e) => Ret::error(e),
         }
     }

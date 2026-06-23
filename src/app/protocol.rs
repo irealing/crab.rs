@@ -68,6 +68,7 @@ impl Protocol for AppProtocol {
         (header, cmd): (&MessageHeader, &Self::Command),
         stream: &mut Stream,
     ) -> Result<(), CrabError> {
+        log::debug!("Received command: {}", cmd);
         let resp = match cmd {
             Command::Ping => Command::Pong,
             Command::Pong => Command::Ping,

@@ -1,5 +1,6 @@
 use crab::proto::HandshakePacket;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use sysinfo::{Disks, System};
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -55,4 +56,16 @@ impl Handshake {
 pub enum Command {
     Ping,
     Pong,
+}
+impl Display for Command {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Command::Ping => {
+                write!(f, "ping")
+            }
+            Command::Pong => {
+                write!(f, "pong")
+            }
+        }
+    }
 }

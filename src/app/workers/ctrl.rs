@@ -44,7 +44,7 @@ async fn node_info(
     let Some((_, info)) = manager.get(&node_id) else {
         return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
     };
-    Ret::success(Some(info))
+    info.into()
 }
 async fn node_ping(State(m): State<Manager>, Path(node_id): Path<String>) -> Ret<()> {
     let Some((h, _)) = m.get(&node_id) else {
