@@ -1,6 +1,8 @@
 mod base;
 
 mod types;
+mod commands;
+
 use super::super::Manager;
 use super::types::Handshake;
 use crate::app::protocol::types::CommandHandler;
