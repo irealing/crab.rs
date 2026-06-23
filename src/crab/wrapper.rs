@@ -188,11 +188,11 @@ where
         &self,
         meta: &NodeMetadata,
         cancel: CancellationToken,
-        stream: &mut Stream,
+        mut stream: Stream,
     ) -> Result<(), CrabError> {
         let (header, cmd) = stream.read_message::<P::Command>().await?;
         self.protocol
-            .handle_command(cancel, meta, (&header, &cmd), stream)
+            .handle_command(cancel, meta, (header, cmd), stream)
             .await
     }
 }

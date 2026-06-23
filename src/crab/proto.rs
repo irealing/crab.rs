@@ -64,12 +64,8 @@ impl Into<Result<(), CrabError>> for AckMessage {
             Ok(())
         } else {
             match self.msg {
-                None => {
-                    Err(CrabError::ErrorCode(self.code))
-                }
-                Some(msg) => {
-                    Err(CrabError::ErrorCodeWithMessage(self.code,msg))
-                }
+                None => Err(CrabError::ErrorCode(self.code)),
+                Some(msg) => Err(CrabError::ErrorCodeWithMessage(self.code, msg)),
             }
         }
     }
@@ -199,8 +195,8 @@ pub trait Protocol: Send + Sync {
         &self,
         _: CancellationToken,
         _: &NodeMetadata,
-        _: (&MessageHeader, &Self::Command),
-        _: &mut Stream,
+        _: (MessageHeader, Self::Command),
+        _: Stream,
     ) -> Result<(), CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNKNOWN_ERROR))
     }
@@ -243,7 +239,7 @@ pub(super) trait Hook: Send + Sync {
         &self,
         _: &NodeMetadata,
         _: CancellationToken,
-        _: &mut Stream,
+        _: Stream,
     ) -> Result<(), CrabError> {
         Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
     }

@@ -136,7 +136,7 @@ impl RemoteNodeInner {
                         Some(None)=>break,
                         Some(Some(mut stream))=> {
                             join_set.spawn(async move {
-                                self_clone.handle_stream(cancel_clone,&mut stream).await
+                                self_clone.handle_stream(cancel_clone,stream).await
                             });
                         }
                     }
@@ -158,7 +158,7 @@ impl RemoteNodeInner {
     async fn handle_stream(
         self: Arc<Self>,
         cancel: CancellationToken,
-        stream: &mut Stream,
+        stream: Stream,
     ) -> Result<(), CrabError> {
         self.hook
             .handle_stream(self.meta.deref(), cancel, stream)

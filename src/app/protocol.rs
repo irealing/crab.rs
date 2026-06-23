@@ -67,8 +67,8 @@ impl Protocol for AppProtocol {
         &self,
         _: CancellationToken,
         _: &NodeMetadata,
-        (header, cmd): (&MessageHeader, &Self::Command),
-        stream: &mut Stream,
+        (header, cmd): (MessageHeader, Self::Command),
+        mut stream: Stream,
     ) -> Result<(), CrabError> {
         log::debug!("Received command: {}", cmd);
         match cmd {
@@ -86,15 +86,6 @@ impl Protocol for AppProtocol {
                 let ret = c.exec();
                 stream
                     .write_message(header.method, header.option, &AckMessage::from(ret))
-                    .await
-            }
-            _ => {
-                stream
-                    .write_error(
-                        header.method,
-                        header.option | MessageHeader::OPTION_ERROR,
-                        &CrabError::ErrorCode(CrabError::UNKNOWN_ERROR),
-                    )
                     .await
             }
         }
