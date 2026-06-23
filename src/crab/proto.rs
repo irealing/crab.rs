@@ -40,7 +40,7 @@ impl MessageHeader {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(super) struct AckMessage {
+pub struct AckMessage {
     pub code: u32,
     pub msg: Option<String>,
 }
@@ -58,7 +58,31 @@ impl AckMessage {
         }
     }
 }
-
+impl Into<Result<(), CrabError>> for AckMessage {
+    fn into(self) -> Result<(), CrabError> {
+        if self.code == CrabError::NO_ERROR {
+            Ok(())
+        } else {
+            match self.msg {
+                None => {
+                    Err(CrabError::ErrorCode(self.code))
+                }
+                Some(msg) => {
+                    Err(CrabError::ErrorCodeWithMessage(self.code,msg))
+                }
+            }
+        }
+    }
+}
+impl From<Result<(), CrabError>> for AckMessage {
+    fn from(value: Result<(), CrabError>) -> Self {
+        let err = match value {
+            Ok(()) => CrabError::ErrorCode(CrabError::NO_ERROR),
+            Err(e) => e,
+        };
+        Self::from_error(&err)
+    }
+}
 const HEADER_SIZE: usize = 12;
 const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 
@@ -92,6 +116,10 @@ impl Stream {
             })?;
             Ok((msg_header, message))
         }
+    }
+    pub async fn read_ack(&mut self) -> Result<(), CrabError> {
+        let (_, ack) = self.read_message::<AckMessage>().await?;
+        ack.into()
     }
     pub async fn write_message<T: Serialize>(
         &mut self,

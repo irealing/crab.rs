@@ -1,11 +1,13 @@
 mod base;
+mod types;
 
-use super::types::{Command, Handshake};
-use crate::app::manager::Manager;
+use super::super::Manager;
+use super::types::Handshake;
 use async_trait::async_trait;
-use crab::proto::{MessageHeader, Protocol, Stream};
+use crab::proto::{AckMessage, MessageHeader, Protocol, Stream};
 use crab::{CrabError, Handle, NodeMetadata};
 use tokio_util::sync::CancellationToken;
+use types::Command;
 
 pub struct AppProtocol {
     device_id: String,
@@ -69,13 +71,33 @@ impl Protocol for AppProtocol {
         stream: &mut Stream,
     ) -> Result<(), CrabError> {
         log::debug!("Received command: {}", cmd);
-        let resp = match cmd {
-            Command::Ping => Command::Pong,
-            Command::Pong => Command::Ping,
-        };
-        stream
-            .write_message(header.method, header.option, &resp)
-            .await
+        match cmd {
+            Command::Ping => {
+                stream
+                    .write_message(header.method, header.option, &Command::Pong)
+                    .await
+            }
+            Command::Pong => {
+                stream
+                    .write_message(header.method, header.option, &Command::Ping)
+                    .await
+            }
+            Command::Delete(c) => {
+                let ret = c.exec();
+                stream
+                    .write_message(header.method, header.option, &AckMessage::from(ret))
+                    .await
+            }
+            _ => {
+                stream
+                    .write_error(
+                        header.method,
+                        header.option | MessageHeader::OPTION_ERROR,
+                        &CrabError::ErrorCode(CrabError::UNKNOWN_ERROR),
+                    )
+                    .await
+            }
+        }
     }
 }
 pub use base::CommandExecutor;

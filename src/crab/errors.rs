@@ -12,6 +12,7 @@ pub enum CrabError {
     EncodeError(#[from] binrw::error::Error),
     JoinError(#[from] tokio::task::JoinError),
     ErrorCode(u32),
+    ErrorCodeWithMessage(u32, String),
 }
 
 impl CrabError {
@@ -93,6 +94,7 @@ impl std::fmt::Display for CrabError {
             Self::QuicWriteError(e) => e.fmt(f),
             Self::EncodeError(e) => e.fmt(f),
             Self::JoinError(e) => e.fmt(f),
+            Self::ErrorCodeWithMessage(code, msg) => write!(f, "Error code {}: {}", code, msg),
         }
     }
 }

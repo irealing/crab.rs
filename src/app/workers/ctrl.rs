@@ -4,10 +4,11 @@ use super::super::types::Handshake;
 use super::super::workers::ApiWorker;
 use super::super::workers::types::Ret;
 use axum::Router;
-use axum::extract::{Path, State};
-use axum::routing::get;
+use axum::extract::{Path, Query, State};
+use axum::routing::{delete, get};
 use crab::CrabError;
 use crab::utils::runit::Worker;
+use serde::Deserialize;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 pub struct CtrlWorker {
@@ -30,6 +31,7 @@ impl ApiWorker for CtrlWorker {
         Router::new()
             .route("/{node_id}", get(node_info))
             .route("/{node_id}/ping", get(node_ping))
+            .route("/{node_id}", delete(node_remove_dir))
             .with_state(self.manager.clone())
     }
     fn tag(&self) -> &str {
@@ -51,4 +53,18 @@ async fn node_ping(State(m): State<Manager>, Path(node_id): Path<String>) -> Ret
         return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
     };
     h.ping().await.into()
+}
+#[derive(Deserialize)]
+struct NodePathParam {
+    path: String,
+}
+async fn node_remove_dir(
+    State(m): State<Manager>,
+    Path(node_id): Path<String>,
+    Query(params): Query<NodePathParam>,
+) -> Ret<()> {
+    let Some((h, _)) = m.get(&node_id) else {
+        return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
+    };
+    h.delete(params.path).await.into()
 }
