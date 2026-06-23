@@ -1,13 +1,24 @@
+use crab::proto::{AckMessage, MessageHeader, Stream};
 use crab::CrabError;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::fs;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Serialize, Deserialize)]
 pub struct DeleteCommand(pub String);
-impl DeleteCommand {
-    pub fn exec(&self) -> Result<(), CrabError> {
-        fs::remove_dir_all(&self.0)?;
+#[async_trait::async_trait]
+impl CommandHandler for DeleteCommand {
+    async fn handle(
+        self: Box<Self>,
+        _: CancellationToken,
+        header: MessageHeader,
+        mut stream: Stream,
+    ) -> Result<(), CrabError> {
+        let ret = fs::remove_dir_all(&self.0).map_err(CrabError::from);
+        stream
+            .write_message(header.method, header.option, &AckMessage::from(ret))
+            .await?;
         Ok(())
     }
 }
@@ -29,6 +40,58 @@ impl Display for Command {
             Command::Delete(ref delete) => {
                 write!(f, "delete({})", delete.0)
             }
+        }
+    }
+}
+#[async_trait::async_trait]
+pub trait CommandExecutor {
+    async fn ping(&self) -> Result<(), CrabError>;
+    async fn delete(&self, _: String) -> Result<(), CrabError>;
+}
+#[async_trait::async_trait]
+pub trait CommandHandler: Send {
+    async fn handle(
+        self: Box<Self>,
+        _: CancellationToken,
+        _: MessageHeader,
+        _: Stream,
+    ) -> Result<(), CrabError>;
+}
+#[async_trait::async_trait]
+impl CommandHandler for Command {
+    async fn handle(
+        self: Box<Self>,
+        cancel: CancellationToken,
+        header: MessageHeader,
+        mut stream: Stream,
+    ) -> Result<(), CrabError> {
+        let cmd = *self;
+        let handler: Option<Box<dyn CommandHandler>> = match cmd {
+            Command::Ping => {
+                return stream
+                    .write_message(header.method, header.option, &Command::Pong)
+                    .await;
+            }
+            Command::Pong => {
+                return stream
+                    .write_message(header.method, header.option, &Command::Ping)
+                    .await;
+            }
+            Command::Delete(delete) => Some(Box::new(delete)),
+        };
+        if let Some(handler) = handler {
+            handler
+                .handle(cancel, header, stream)
+                .await
+                .inspect_err(|e| log::warn!("handle command error: {}", e))
+        } else {
+            stream
+                .write_error(
+                    header.method,
+                    header.option,
+                    &CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR),
+                )
+                .await
         }
     }
 }

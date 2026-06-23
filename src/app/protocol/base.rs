@@ -1,12 +1,8 @@
-use super::types::{Command, DeleteCommand};
+use super::types::{Command, CommandExecutor, DeleteCommand};
 use crab::proto::{MessageHeader, Method, Stream};
 use crab::{CrabError, Handle, Node};
 use tokio_util::sync::CancellationToken;
-#[async_trait::async_trait]
-pub trait CommandExecutor {
-    async fn ping(&self) -> Result<(), CrabError>;
-    async fn delete(&self, _: String) -> Result<(), CrabError>;
-}
+
 #[async_trait::async_trait]
 impl CommandExecutor for Handle {
     async fn ping(&self) -> Result<(), CrabError> {

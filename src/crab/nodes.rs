@@ -134,7 +134,7 @@ impl RemoteNodeInner {
                     match ret{
                         None=>break,
                         Some(None)=>break,
-                        Some(Some(mut stream))=> {
+                        Some(Some(stream))=> {
                             join_set.spawn(async move {
                                 self_clone.handle_stream(cancel_clone,stream).await
                             });

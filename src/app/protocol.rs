@@ -1,13 +1,15 @@
 mod base;
-mod types;
 
+mod types;
 use super::super::Manager;
 use super::types::Handshake;
+use crate::app::protocol::types::CommandHandler;
 use async_trait::async_trait;
-use crab::proto::{AckMessage, MessageHeader, Protocol, Stream};
+use crab::proto::{MessageHeader, Protocol, Stream};
 use crab::{CrabError, Handle, NodeMetadata};
 use tokio_util::sync::CancellationToken;
 use types::Command;
+pub use types::CommandExecutor;
 
 pub struct AppProtocol {
     device_id: String,
@@ -65,30 +67,12 @@ impl Protocol for AppProtocol {
     }
     async fn handle_command(
         &self,
-        _: CancellationToken,
+        cancel: CancellationToken,
         _: &NodeMetadata,
         (header, cmd): (MessageHeader, Self::Command),
-        mut stream: Stream,
+        stream: Stream,
     ) -> Result<(), CrabError> {
         log::debug!("Received command: {}", cmd);
-        match cmd {
-            Command::Ping => {
-                stream
-                    .write_message(header.method, header.option, &Command::Pong)
-                    .await
-            }
-            Command::Pong => {
-                stream
-                    .write_message(header.method, header.option, &Command::Ping)
-                    .await
-            }
-            Command::Delete(c) => {
-                let ret = c.exec();
-                stream
-                    .write_message(header.method, header.option, &AckMessage::from(ret))
-                    .await
-            }
-        }
+        Box::new(cmd).handle(cancel, header, stream).await
     }
 }
-pub use base::CommandExecutor;
