@@ -1,7 +1,8 @@
 use super::super::Manager;
-use crate::app::types::Handshake;
-use crate::app::workers::ApiWorker;
-use crate::app::workers::types::Ret;
+use super::super::protocol::CommandExecutor;
+use super::super::types::Handshake;
+use super::super::workers::ApiWorker;
+use super::super::workers::types::Ret;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::routing::get;
@@ -9,7 +10,6 @@ use crab::CrabError;
 use crab::utils::runit::Worker;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-
 pub struct CtrlWorker {
     manager: Manager,
 }
@@ -29,6 +29,7 @@ impl ApiWorker for CtrlWorker {
     fn routers(&self) -> Router {
         Router::new()
             .route("/{node_id}", get(node_info))
+            .route("/{node_id}/ping", get(node_ping))
             .with_state(self.manager.clone())
     }
     fn tag(&self) -> &str {
@@ -44,4 +45,10 @@ async fn node_info(
         return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
     };
     Ret::success(Some(info))
+}
+async fn node_ping(State(m): State<Manager>, Path(node_id): Path<String>) -> Ret<()> {
+    let Some((h, _)) = m.get(&node_id) else {
+        return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
+    };
+    h.ping().await.into()
 }

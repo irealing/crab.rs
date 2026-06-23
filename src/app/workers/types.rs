@@ -33,3 +33,14 @@ where
         Json(self).into_response()
     }
 }
+impl<T> From<Result<T, CrabError>> for Ret<T>
+where
+    T: Serialize,
+{
+    fn from(value: Result<T, CrabError>) -> Self {
+        match value {
+            Ok(val) => Ret::success(Some(val)),
+            Err(e) => Ret::error(e),
+        }
+    }
+}
