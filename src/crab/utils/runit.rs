@@ -33,11 +33,7 @@ impl Worker for Vec<Arc<dyn Worker>> {
                 Ok(Ok(_)) => continue,
             }
         }
-        if let Some(err) = first_err {
-            Err(err)
-        } else {
-            Ok(())
-        }
+        first_err.map_or(Ok(()), Err)
     }
 }
 pub struct WaitExitWorker {

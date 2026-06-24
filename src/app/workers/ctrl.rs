@@ -55,16 +55,18 @@ async fn node_ping(State(m): State<Manager>, Path(node_id): Path<String>) -> Ret
     h.ping().await.into()
 }
 #[derive(Deserialize)]
-struct NodePathParam {
+struct RemoveNodePath {
     path: String,
+    #[serde(default)]
+    dir: bool,
 }
 async fn node_remove_dir(
     State(m): State<Manager>,
     Path(node_id): Path<String>,
-    Query(params): Query<NodePathParam>,
+    Query(params): Query<RemoveNodePath>,
 ) -> Ret<()> {
     let Some((h, _)) = m.get(&node_id) else {
         return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
     };
-    h.delete(params.path, true).await.into()
+    h.delete(params.path, params.dir).await.into()
 }

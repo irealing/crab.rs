@@ -39,6 +39,7 @@ impl CrabError {
     pub const NODE_ALREADY_EXIT: u32 = 20;
     pub const NODE_EXISTS: u32 = 21;
     pub const UNEXCEPTED_RESPONSE: u32 = 22;
+    pub const TASK_ACK_FAILED: u32 = 23;
     pub const ILLEGAL_ERROR: u32 = 0xffff_fffe;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
     pub fn err_no(&self) -> u32 {
@@ -75,6 +76,7 @@ impl CrabError {
                 Self::ILLEGAL_ERROR => "Illegal error",
                 Self::UNKNOWN_ERROR => "Unknown error",
                 Self::UNEXCEPTED_RESPONSE => "Unexpected response",
+                Self::TASK_ACK_FAILED => "Task ack failure",
                 _ => "Unknown error code",
             },
             _ => "",
