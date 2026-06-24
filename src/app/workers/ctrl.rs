@@ -31,7 +31,7 @@ impl ApiWorker for CtrlWorker {
         Router::new()
             .route("/{node_id}", get(node_info))
             .route("/{node_id}/ping", get(node_ping))
-            .route("/{node_id}", delete(node_remove_dir))
+            .route("/{node_id}/dir", delete(node_remove_dir))
             .with_state(self.manager.clone())
     }
     fn tag(&self) -> &str {
@@ -66,5 +66,5 @@ async fn node_remove_dir(
     let Some((h, _)) = m.get(&node_id) else {
         return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
     };
-    h.delete(params.path).await.into()
+    h.delete(params.path, true).await.into()
 }

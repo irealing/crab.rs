@@ -17,14 +17,14 @@ impl CommandExecutor for Handle {
         })
         .await
     }
-    async fn delete(&self, dir: String) -> Result<(), CrabError> {
+    async fn delete(&self, p: String, dir: bool) -> Result<(), CrabError> {
         log::debug!("deleting node {} path {}", self.id(), dir);
         self.exec(async move |_: CancellationToken, mut stream: Stream| {
             stream
                 .write_message(
                     Method::Command,
                     MessageHeader::OPTION_NONE,
-                    &Command::Delete(DeleteCommand(dir)),
+                    &Command::Delete(DeleteCommand { path: p, dir }),
                 )
                 .await?;
             stream.read_ack().await

@@ -20,7 +20,7 @@ impl Display for Command {
                 write!(f, "pong")
             }
             Command::Delete(ref delete) => {
-                write!(f, "delete({})", delete.0)
+                write!(f, "delete({})", delete.path)
             }
         }
     }
@@ -28,7 +28,7 @@ impl Display for Command {
 #[async_trait::async_trait]
 pub trait CommandExecutor {
     async fn ping(&self) -> Result<(), CrabError>;
-    async fn delete(&self, _: String) -> Result<(), CrabError>;
+    async fn delete(&self, _: String, _: bool) -> Result<(), CrabError>;
 }
 #[async_trait::async_trait]
 pub trait CommandHandler: Send {
