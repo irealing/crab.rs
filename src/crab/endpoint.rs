@@ -8,9 +8,8 @@ use super::utils::runit::Worker;
 
 use super::Handle;
 use super::nodes::RemoteNode;
-use super::proto::{Hook, Protocol};
+use super::proto::{Hook, ProtoWrapper, Protocol};
 use super::types::{Endpoint, NodeMetadata, Options};
-use super::wrapper::ProtoWrapper;
 use super::{CrabError, utils::crypto::TLSProvider};
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig, Connection};

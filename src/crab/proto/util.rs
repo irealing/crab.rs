@@ -3,7 +3,7 @@ use crate::CrabError;
 use bincode_next::config;
 use bincode_next::serde::{decode_from_slice, encode_into_std_write};
 use binrw::{BinRead, BinWrite};
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{BufMut, BytesMut};
 use quinn::{Connection, RecvStream, SendStream};
 use serde::Serialize;
 use serde::de::DeserializeOwned;

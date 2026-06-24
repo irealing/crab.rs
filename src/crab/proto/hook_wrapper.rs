@@ -1,14 +1,12 @@
-use super::CrabError;
-use super::Handle;
-use super::proto::{HandshakePacket, MessageHeader, Method, Protocol, Stream};
-use crate::crab::proto::{AckMessage, Hook};
-use crate::crab::types::NodeMetadata;
+use super::{AckMessage, HandshakePacket, Hook, MessageHeader, Method, Protocol, Stream};
+use super::{CrabError, Handle, NodeMetadata};
 use quinn::Connection;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::any::Any;
 use tokio_util::sync::CancellationToken;
-pub(super) struct ProtoWrapper<P: Protocol> {
+
+pub struct ProtoWrapper<P: Protocol> {
     protocol: P,
 }
 impl<P> ProtoWrapper<P>

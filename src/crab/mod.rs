@@ -5,7 +5,6 @@ mod nodes;
 pub mod proto;
 mod types;
 pub mod utils;
-mod wrapper;
 
 pub use endpoint::{EndpointConfig, create_local_endpoint};
 pub use errors::CrabError;
