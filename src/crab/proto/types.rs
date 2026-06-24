@@ -1,6 +1,6 @@
-use binrw::{binrw, BinRead, BinWrite};
-use serde::{Deserialize, Serialize};
 use crate::CrabError;
+use binrw::{BinRead, BinWrite, binrw};
+use serde::{Deserialize, Serialize};
 
 #[derive(BinRead, BinWrite, Debug, PartialEq, Eq, Clone, Copy)]
 #[brw(repr = u16)]
@@ -32,7 +32,6 @@ impl MessageHeader {
     }
 }
 
-
 #[derive(Serialize, Deserialize)]
 pub struct AckMessage {
     pub code: u32,
@@ -49,6 +48,12 @@ impl AckMessage {
                 code: CrabError::UNKNOWN_ERROR,
                 msg: Some(err.to_string()),
             },
+        }
+    }
+    pub fn success() -> Self {
+        Self {
+            code: CrabError::NO_ERROR,
+            msg: None,
         }
     }
 }

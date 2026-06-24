@@ -1,5 +1,5 @@
 use crate::CrabError;
-use crate::proto::{MessageHeader, Method, Stream};
+use crate::proto::{AckMessage, MessageHeader, Method, Stream};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::oneshot;
@@ -97,8 +97,22 @@ where
             .await
             .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?
         {
-            Err(e) => Err(e),
-            Ok(executor) => executor.execute(c, stream).await.map(|_| ()),
+            Err(e) => {
+                stream
+                    .write_error(Method::Command, MessageHeader::OPTION_NONE, &e)
+                    .await?;
+                Err(e)
+            }
+            Ok(executor) => {
+                stream
+                    .write_message(
+                        Method::Command,
+                        MessageHeader::OPTION_NONE,
+                        &AckMessage::success(),
+                    )
+                    .await?;
+                executor.execute(c, stream).await.map(|_| ())
+            }
         }
     }
 }
