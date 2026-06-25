@@ -1,8 +1,7 @@
 use super::commands::{DeleteCommand, FileMetadata, ReadFile};
 use super::types::{Command, CommandExecutor};
-use crab::proto::{Executor, MessageHeader, Method, Stream};
+use crab::proto::{Executor, MessageHeader, Method, Stream, TaskHandle};
 use crab::{CrabError, Handle, Node};
-use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 #[async_trait::async_trait]
@@ -32,10 +31,7 @@ impl CommandExecutor for Handle {
         })
         .await
     }
-    async fn read_file<E>(
-        &self,
-        filename: String,
-    ) -> Result<(oneshot::Sender<Result<E, CrabError>>, FileMetadata), CrabError>
+    async fn read_file<E>(&self, filename: String) -> TaskHandle<E, FileMetadata>
     where
         E: Executor<Output = ()>,
     {

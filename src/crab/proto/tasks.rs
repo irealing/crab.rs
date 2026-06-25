@@ -51,12 +51,12 @@ where
         self(c, stream).await
     }
 }
-
+pub type TaskHandle<E, I> = Result<(oneshot::Sender<Result<E, CrabError>>, I), CrabError>;
 /// 用于两阶段返回的异步任务
 /// 第一次通过`oneshot`返回第一阶段数据，ack时（通过oneshot发送`Executor`用于回调后续数据）
 /// 传入`Executor`的返回值会被忽略
 pub struct MultiStageTask<C, I, E: Executor> {
-    pub initial_tx: oneshot::Sender<Result<(oneshot::Sender<Result<E, CrabError>>, I), CrabError>>,
+    pub initial_tx: oneshot::Sender<TaskHandle<E, I>>,
     pub cmd: C,
 }
 #[async_trait::async_trait]
