@@ -1,6 +1,6 @@
 use super::types::{Command, CommandHandler};
-use crate::app::types::Handshake;
 use crate::app::Manager;
+use crate::app::types::Handshake;
 use async_trait::async_trait;
 use crab::proto::{MessageHeader, Protocol, Stream};
 use crab::{CrabError, Handle, NodeMetadata};

@@ -76,7 +76,7 @@ impl CommandHandler for ReadFile {
                 stream
                     .write_message::<FileMetadata>(h.method, h.option, &metadata)
                     .await
-                    .inspect_err(|e| log::warn!("failed to write filemetadata: {}", e))?;
+                    .inspect_err(|e| log::warn!("failed to write file metadata: {}", e))?;
             }
             Err(e) => {
                 stream.write_error(h.method, h.option, &e).await?;

@@ -1,6 +1,7 @@
 use super::commands::{DeleteCommand, FileMetadata, ReadFile};
 use crab::CrabError;
 use crab::proto::{Executor, MessageHeader, Stream};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use tokio::sync::oneshot;
@@ -86,6 +87,30 @@ impl CommandHandler for Command {
                     &CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR),
                 )
                 .await
+        }
+    }
+}
+#[async_trait::async_trait]
+pub trait SimpleCommandHandler: DeserializeOwned + Send + 'static {
+    type Response: Serialize + Send;
+    async fn make_response(self, _: CancellationToken) -> Result<Self::Response, CrabError>;
+}
+#[async_trait::async_trait]
+impl<C, T> CommandHandler for C
+where
+    C: SimpleCommandHandler<Response = T>,
+    T: Serialize + Send + Sync + 'static,
+{
+    async fn handle(
+        self: Box<Self>,
+        c: CancellationToken,
+        h: MessageHeader,
+        mut stream: Stream,
+    ) -> Result<(), CrabError> {
+        let this = *self;
+        match this.make_response(c.clone()).await {
+            Ok(resp) => stream.write_message(h.method, h.option, &resp).await,
+            Err(err) => stream.write_error(h.method, h.option, &err).await,
         }
     }
 }
