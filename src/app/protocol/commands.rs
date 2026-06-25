@@ -106,6 +106,7 @@ impl CommandHandler for ReadFile {
                 Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
             }
             r=io::copy(&mut file, &mut stream.writer)=>{
+                let _=stream.writer.finish();
                 match r{
                     Ok(size)=>{
                         log::debug!("copy {} bytes", size);

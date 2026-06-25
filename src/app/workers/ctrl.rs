@@ -13,7 +13,7 @@ use crab::proto::Stream;
 use crab::utils::runit::Worker;
 use serde::Deserialize;
 use std::sync::Arc;
-use tokio::io::{copy, duplex};
+use tokio::io::{AsyncWriteExt, copy, duplex};
 use tokio_util::io::ReaderStream;
 use tokio_util::sync::CancellationToken;
 
@@ -101,9 +101,17 @@ async fn read_node_file(
     let (writer, reader) = duplex(BUF_SIZE);
     if let Err(_) = sender.send(Ok(async move |_: CancellationToken, mut stream: Stream| {
         let mut writer = writer;
+        if let Err(err) = stream.read_ack().await {
+            log::warn!("Error while reading ack from stream: {}", err);
+            let _ = writer
+                .write(&format!("read ack error {}", &err).as_bytes())
+                .await;
+            return Err(err);
+        }
         copy(&mut stream.reader, &mut writer)
             .await
             .inspect(|copied| log::debug!("read file copied {} bytes", copied))?;
+        writer.shutdown().await?;
         return Ok(());
     })) {
         return StreamResponse::Error(Ret::error(CrabError::ErrorCode(CrabError::CANCELED_ERROR)));
