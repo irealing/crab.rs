@@ -91,7 +91,7 @@ async fn read_node_file(
             CrabError::NODE_ALREADY_EXIT,
         )));
     };
-    let (sender, _) = match h.read_file(params.path).await {
+    let (sender, metadata) = match h.read_file(params.path).await {
         Ok(data) => data,
         Err(e) => {
             return StreamResponse::Error(Ret::error(e));
@@ -109,5 +109,5 @@ async fn read_node_file(
         return StreamResponse::Error(Ret::error(CrabError::ErrorCode(CrabError::CANCELED_ERROR)));
     }
     let stream = ReaderStream::new(reader);
-    StreamResponse::OK(Body::from_stream(stream))
+    StreamResponse::File((metadata, Body::from_stream(stream)))
 }

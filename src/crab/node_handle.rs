@@ -1,11 +1,8 @@
-use super::proto::Executor;
-use super::proto::{AsyncJob, AsyncTask};
+use super::proto::{AsyncJob, AsyncTask, Executor, MultiStageTask};
 use super::types::{NodeMetadata, NodeStatus};
-use super::CrabError;
-use super::Node;
-use crate::proto::MultiStageTask;
-use serde::de::DeserializeOwned;
+use super::{CrabError, Node};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::oneshot::Sender;

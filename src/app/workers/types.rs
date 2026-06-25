@@ -1,9 +1,10 @@
+use super::super::protocol::FileMetadata;
 use axum::Json;
 use axum::body::Body;
+use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use crab::CrabError;
 use serde::Serialize;
-
 #[derive(Serialize)]
 pub struct Ret<D: Serialize> {
     pub err_no: u32,
@@ -54,12 +55,24 @@ where
 pub enum StreamResponse {
     Error(Ret<()>),
     OK(Body),
+    File((FileMetadata, Body)),
 }
 impl IntoResponse for StreamResponse {
     fn into_response(self) -> Response {
         match self {
             StreamResponse::Error(ret) => ret.into_response(),
             StreamResponse::OK(body) => body.into_response(),
+            StreamResponse::File((metadata, body)) => (
+                [
+                    (header::CONTENT_TYPE, "application/octet-stream"),
+                    (
+                        header::CONTENT_LENGTH,
+                        format!("{}", metadata.filesize).as_str(),
+                    ),
+                ],
+                body,
+            )
+                .into_response(),
         }
     }
 }
