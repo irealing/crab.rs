@@ -3,14 +3,20 @@ use super::super::protocol::CommandExecutor;
 use super::super::types::Handshake;
 use super::super::workers::ApiWorker;
 use super::super::workers::types::Ret;
+use super::types::StreamResponse;
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::routing::{delete, get};
 use crab::CrabError;
+use crab::proto::Stream;
 use crab::utils::runit::Worker;
 use serde::Deserialize;
 use std::sync::Arc;
+use tokio::io::{copy, duplex};
+use tokio_util::io::ReaderStream;
 use tokio_util::sync::CancellationToken;
+
 pub struct CtrlWorker {
     manager: Manager,
 }
@@ -32,6 +38,7 @@ impl ApiWorker for CtrlWorker {
             .route("/{node_id}", get(node_info))
             .route("/{node_id}/ping", get(node_ping))
             .route("/{node_id}/dir", delete(node_remove_dir))
+            .route("/{node_id}/file", get(read_node_file))
             .with_state(self.manager.clone())
     }
     fn tag(&self) -> &str {
@@ -69,4 +76,38 @@ async fn node_remove_dir(
         return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
     };
     h.delete(params.path, params.dir).await.into()
+}
+#[derive(Deserialize)]
+struct ReadNodeFile {
+    path: String,
+}
+async fn read_node_file(
+    State(m): State<Manager>,
+    Path(node_id): Path<String>,
+    Query(params): Query<ReadNodeFile>,
+) -> StreamResponse {
+    let Some((h, _)) = m.get(&node_id) else {
+        return StreamResponse::Error(Ret::error(CrabError::ErrorCode(
+            CrabError::NODE_ALREADY_EXIT,
+        )));
+    };
+    let (sender, _) = match h.read_file(params.path).await {
+        Ok(data) => data,
+        Err(e) => {
+            return StreamResponse::Error(Ret::error(e));
+        }
+    };
+    const BUF_SIZE: usize = 1024 * 16;
+    let (writer, reader) = duplex(BUF_SIZE);
+    if let Err(_) = sender.send(Ok(async move |_: CancellationToken, mut stream: Stream| {
+        let mut writer = writer;
+        copy(&mut stream.reader, &mut writer)
+            .await
+            .inspect(|copied| log::debug!("read file copied {} bytes", copied))?;
+        return Ok(());
+    })) {
+        return StreamResponse::Error(Ret::error(CrabError::ErrorCode(CrabError::CANCELED_ERROR)));
+    }
+    let stream = ReaderStream::new(reader);
+    StreamResponse::OK(Body::from_stream(stream))
 }

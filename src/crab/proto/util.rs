@@ -133,4 +133,41 @@ impl Stream {
         let (writer, reader) = conn.open_bi().await?;
         Ok(Self { writer, reader })
     }
+    pub async fn read_and_ack<T: DeserializeOwned, V>(
+        &mut self,
+        valid: Option<V>,
+    ) -> Result<(MessageHeader, T), CrabError>
+    where
+        V: FnOnce(T) -> Result<T, CrabError>,
+    {
+        let (header, msg) = self.reader.read_message().await?;
+        let ret = if let Some(val) = valid {
+            val(msg)
+        } else {
+            Ok(msg)
+        };
+        match ret {
+            Ok(msg) => {
+                self.writer
+                    .write_message(header.method, header.option, &AckMessage::success())
+                    .await?;
+                Ok((header, msg))
+            }
+            Err(err) => {
+                self.writer
+                    .write_error(header.method, header.option, &err)
+                    .await?;
+                Err(err)
+            }
+        }
+    }
+    pub async fn write_and_ack<T: Serialize + Sync>(
+        &mut self,
+        method: Method,
+        option: u8,
+        msg: T,
+    ) -> Result<(), CrabError> {
+        self.writer.write_message(method, option, &msg).await?;
+        self.reader.read_ack().await
+    }
 }

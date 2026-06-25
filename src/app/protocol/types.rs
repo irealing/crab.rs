@@ -1,14 +1,16 @@
-use super::commands::DeleteCommand;
+use super::commands::{DeleteCommand, FileMetadata, ReadFile};
 use crab::CrabError;
-use crab::proto::{MessageHeader, Stream};
+use crab::proto::{Executor, MessageHeader, Stream};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 #[derive(Deserialize, Serialize)]
 pub enum Command {
     Ping,
     Pong,
     Delete(DeleteCommand),
+    ReadFile(ReadFile),
 }
 impl Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -22,6 +24,9 @@ impl Display for Command {
             Command::Delete(ref delete) => {
                 write!(f, "delete({})", delete.path)
             }
+            Command::ReadFile(ref read) => {
+                write!(f, "read_file({})", read.path)
+            }
         }
     }
 }
@@ -29,6 +34,12 @@ impl Display for Command {
 pub trait CommandExecutor {
     async fn ping(&self) -> Result<(), CrabError>;
     async fn delete(&self, _: String, _: bool) -> Result<(), CrabError>;
+    async fn read_file<E>(
+        &self,
+        _: String,
+    ) -> Result<(oneshot::Sender<Result<E, CrabError>>, FileMetadata), CrabError>
+    where
+        E: Executor<Output = ()>;
 }
 #[async_trait::async_trait]
 pub trait CommandHandler: Send {
@@ -60,6 +71,7 @@ impl CommandHandler for Command {
                     .await;
             }
             Command::Delete(delete) => Some(Box::new(delete)),
+            Command::ReadFile(read) => Some(Box::new(read)),
         };
         if let Some(handler) = handler {
             handler

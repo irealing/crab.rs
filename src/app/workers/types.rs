@@ -1,4 +1,5 @@
 use axum::Json;
+use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use crab::CrabError;
 use serde::Serialize;
@@ -47,6 +48,18 @@ where
         match value {
             Ok(val) => val.into(),
             Err(e) => Ret::error(e),
+        }
+    }
+}
+pub enum StreamResponse {
+    Error(Ret<()>),
+    OK(Body),
+}
+impl IntoResponse for StreamResponse {
+    fn into_response(self) -> Response {
+        match self {
+            StreamResponse::Error(ret) => ret.into_response(),
+            StreamResponse::OK(body) => body.into_response(),
         }
     }
 }
