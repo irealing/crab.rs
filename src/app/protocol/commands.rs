@@ -162,6 +162,7 @@ impl CommandHandler for WriteFile {
                 return Err(err.into());
             }
         };
+        stream.read_ack().await?;
         let copy_file_ret = tokio::select! {
             _=cancel.cancelled() => {
                 Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
