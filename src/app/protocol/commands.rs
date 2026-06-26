@@ -1,4 +1,4 @@
-use crate::app::protocol::types::CommandHandler;
+use crate::app::protocol::types::{CommandHandler, SimpleCommandHandler};
 use crate::app::protocol::util::generate_temp_path;
 use crab::CrabError;
 use crab::proto::{AckMessage, MessageHeader, Stream};
@@ -15,25 +15,19 @@ pub struct DeleteCommand {
     pub dir: bool,
 }
 #[async_trait::async_trait]
-impl CommandHandler for DeleteCommand {
-    async fn handle(
-        self: Box<Self>,
-        _: CancellationToken,
-        header: MessageHeader,
-        mut stream: Stream,
-    ) -> Result<(), CrabError> {
+impl SimpleCommandHandler for DeleteCommand {
+    type Response = AckMessage;
+    async fn make_response(self, _: CancellationToken) -> Result<Self::Response, CrabError> {
         let ret = if self.dir {
             fs::remove_dir_all(&self.path).await
         } else {
             fs::remove_file(&self.path).await
         }
         .map_err(CrabError::from);
-        stream
-            .write_message(header.method, header.option, &AckMessage::from(ret))
-            .await?;
-        Ok(())
+        Ok(AckMessage::from(ret))
     }
 }
+
 #[derive(Serialize, Deserialize)]
 pub struct FileMetadata {
     pub filesize: u64,
