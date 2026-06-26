@@ -116,3 +116,33 @@ where
         }
     }
 }
+pub struct ExecutorWrapper<T, E> {
+    tx: oneshot::Sender<Result<T, CrabError>>,
+    executor: E,
+}
+impl<T, E> ExecutorWrapper<T, E>
+where
+    T: Send + 'static,
+    E: Executor<Output = T> + Send,
+{
+    pub fn wrap(executor: E) -> (Self, oneshot::Receiver<Result<T, CrabError>>) {
+        let (tx, rx) = oneshot::channel();
+        (Self { tx, executor }, rx)
+    }
+}
+#[async_trait::async_trait]
+impl<T, E> Executor for ExecutorWrapper<T, E>
+where
+    T: Send + 'static,
+    E: Executor<Output = T> + Send + 'static,
+{
+    type Output = ();
+    async fn execute(self, c: CancellationToken, stream: Stream) -> Result<(), CrabError> {
+        let ret = self.executor.execute(c, stream).await;
+        if let Err(_) = self.tx.send(ret) {
+            Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
+        } else {
+            Ok(())
+        }
+    }
+}

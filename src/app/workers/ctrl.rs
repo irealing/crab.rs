@@ -1,5 +1,5 @@
 use super::super::Manager;
-use super::super::protocol::CommandExecutor;
+use super::super::protocol::{CommandExecutor, WriteFile};
 use super::super::types::Handshake;
 use super::super::workers::ApiWorker;
 use super::super::workers::types::Ret;
@@ -7,14 +7,15 @@ use super::types::StreamResponse;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use crab::CrabError;
-use crab::proto::Stream;
+use crab::proto::{ExecutorWrapper, Stream};
 use crab::utils::runit::Worker;
+use futures_util::TryStreamExt;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, copy, duplex};
-use tokio_util::io::ReaderStream;
+use tokio_util::io::{ReaderStream, StreamReader};
 use tokio_util::sync::CancellationToken;
 
 pub struct CtrlWorker {
@@ -39,6 +40,7 @@ impl ApiWorker for CtrlWorker {
             .route("/{node_id}/ping", get(node_ping))
             .route("/{node_id}/dir", delete(node_remove_dir))
             .route("/{node_id}/file", get(read_node_file))
+            .route("/{node_id}/file", post(node_write_file))
             .with_state(self.manager.clone())
     }
     fn tag(&self) -> &str {
@@ -118,4 +120,54 @@ async fn read_node_file(
     }
     let stream = ReaderStream::new(reader);
     StreamResponse::File((metadata, Body::from_stream(stream)))
+}
+async fn node_write_file(
+    State(m): State<Manager>,
+    Path(node_id): Path<String>,
+    Query(param): Query<WriteFile>,
+    body: Body,
+) -> Ret<()> {
+    let Some((h, _)) = m.get(&node_id) else {
+        return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
+    };
+    let body_stream = body.into_data_stream();
+    let io_stream = body_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+    let reader = StreamReader::new(io_stream);
+
+    let sender = match h.write_file(param).await {
+        Ok((sender, _)) => sender,
+        Err(err) => {
+            return Ret::error(err);
+        }
+    };
+    let executor =
+        async move |cancel: CancellationToken, mut stream: Stream| -> Result<(), CrabError> {
+            let mut reader = reader;
+            tokio::select! {
+                _=cancel.cancelled()=>{
+                  return  Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR));
+                }
+                ret=copy(&mut reader,&mut stream.writer)=>{
+                    let _=stream.writer.shutdown().await;
+                    return match ret{
+                        Ok(size)=>{
+                            log::debug!("write file successfully {} bytes", size);
+                            stream.read_ack().await
+                        },
+                        Err(e)=>{
+                            log::warn!("write file failed {:?}", e);
+                            Err(e.into())
+                        }
+                    }
+                }
+            }
+        };
+    let (executor, err_rx) = ExecutorWrapper::wrap(executor);
+    if let Err(_) = sender.send(Ok(executor)) {
+        return Ret::error(CrabError::ErrorCode(CrabError::CANCELED_ERROR));
+    }
+    match err_rx.await {
+        Ok(ret) => Ret::from(ret),
+        Err(_) => Ret::error(CrabError::ErrorCode(CrabError::CANCELED_ERROR)),
+    }
 }

@@ -29,6 +29,7 @@ bytes = "1.11.1"
 sysinfo = { version = "0.39.3", optional = true }
 axum = { version = "0.8.9", optional = true }
 dashmap = { version = "6.2.1", optional = true }
+futures-util = "0.3.32"
 [features]
 default = []
 bin = ["logforth", "sysinfo", "axum", "dashmap"]

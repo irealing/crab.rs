@@ -1,6 +1,7 @@
 use super::commands::{DeleteCommand, FileMetadata, ReadFile};
 use super::types::{Command, CommandExecutor};
-use crab::proto::{Executor, MessageHeader, Method, Stream, TaskHandle};
+use crate::app::protocol::WriteFile;
+use crab::proto::{AckMessage, Executor, MessageHeader, Method, Stream, TaskHandle};
 use crab::{CrabError, Handle, Node};
 use tokio_util::sync::CancellationToken;
 
@@ -39,5 +40,14 @@ impl CommandExecutor for Handle {
             path: filename,
         }))
         .await
+    }
+    async fn write_file<E>(&self, cmd: WriteFile) -> TaskHandle<E, ()>
+    where
+        E: Executor<Output = ()>,
+    {
+        let (sender, _) = self
+            .exec_with_ack::<Command, AckMessage, E>(Command::WriteFile(cmd))
+            .await?;
+        Ok((sender, ()))
     }
 }

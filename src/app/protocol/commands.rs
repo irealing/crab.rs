@@ -1,8 +1,10 @@
 use crate::app::protocol::types::CommandHandler;
+use crate::app::protocol::util::generate_temp_path;
 use crab::CrabError;
 use crab::proto::{AckMessage, MessageHeader, Stream};
 use serde::{Deserialize, Serialize};
 use std::fs::Metadata;
+use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 use tokio::{fs, io};
 use tokio_util::sync::CancellationToken;
@@ -118,5 +120,101 @@ impl CommandHandler for ReadFile {
                 }
             }
         }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WriteFile {
+    pub path: String,
+    #[serde(default)]
+    pub overwrite: bool,
+    #[serde(default)]
+    pub mkdir: bool,
+}
+impl WriteFile {
+    async fn create_temp_file(&self) -> Result<(PathBuf, fs::File), CrabError> {
+        let temp_file_path = generate_temp_path(&self.path, self.mkdir).await?;
+        let file = fs::File::create(&temp_file_path)
+            .await
+            .inspect_err(|e| log::warn!("WriteFile:failed to create temp file: {}", e))?;
+        Ok((temp_file_path, file))
+    }
+}
+#[async_trait::async_trait]
+impl CommandHandler for WriteFile {
+    async fn handle(
+        self: Box<Self>,
+        cancel: CancellationToken,
+        header: MessageHeader,
+        mut stream: Stream,
+    ) -> Result<(), CrabError> {
+        let (temp_file_path, mut output) = match self.create_temp_file().await {
+            Ok(f) => {
+                stream
+                    .write_message(header.method, header.option, &AckMessage::success())
+                    .await?;
+                f
+            }
+            Err(err) => {
+                stream
+                    .write_error(header.method, header.option, &err)
+                    .await?;
+                return Err(err.into());
+            }
+        };
+        let copy_file_ret = tokio::select! {
+            _=cancel.cancelled() => {
+                Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
+            }
+            ret=io::copy(&mut stream.reader, &mut output) => {
+                match ret {
+                    Ok(size)=>{
+                        log::debug!("WriteFile copy {} bytes", size);
+                        Ok(())
+                    },
+                    Err(err)=>{
+                        Err(err.into())
+                    }
+                }
+            }
+        };
+        let write_ret = match copy_file_ret {
+            Ok(_) => fs::try_exists(&self.path)
+                .await
+                .map_err(CrabError::from)
+                .and_then(|exists| {
+                    if !exists || !self.overwrite {
+                        Ok(())
+                    } else {
+                        Err(
+                            io::Error::new(io::ErrorKind::AlreadyExists, "File already exists")
+                                .into(),
+                        )
+                    }
+                }),
+            Err(err) => Err(err),
+        };
+        drop(output);
+        let ack = match write_ret {
+            Ok(_) => {
+                log::debug!(
+                    "WriteFile successfully,rename file {}",
+                    temp_file_path.display()
+                );
+                fs::rename(&temp_file_path, &self.path)
+                    .await
+                    .map(|_| AckMessage::success())
+                    .unwrap_or_else(|e| AckMessage::from_error(&e.into()))
+            }
+            Err(err) => AckMessage::from_error(&err.into()),
+        };
+        if ack.code != CrabError::NO_ERROR {
+            let _ = fs::remove_file(&temp_file_path)
+                .await
+                .inspect_err(|e| log::warn!("failed to remove file: {}", e));
+        }
+        stream
+            .write_message(header.method, header.option, &ack)
+            .await
     }
 }
