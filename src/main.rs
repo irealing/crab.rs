@@ -3,13 +3,12 @@ use std::{process::ExitCode, sync::Arc};
 
 use tokio_util::sync::CancellationToken;
 
-use crate::app::workers::{BaseApiWorker, CtrlWorker, EndpointApiWorker};
-use app::Manager;
+use app::workers::{BaseApiWorker, CtrlWorker, EndpointApiWorker};
+use app::ServiceProvider;
 use app::{config, protocol};
-use crab::utils::crypto::TLSProvider;
 use crab::{
-    CrabError, create_local_endpoint,
-    utils::runit::{WaitExitWorker, Worker},
+    create_local_endpoint, utils::runit::{WaitExitWorker, Worker},
+    CrabError,
 };
 
 const DEFAULT_CONFIG_FILE: &str = "@config.toml";
@@ -32,17 +31,17 @@ async fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 async fn start(cfg: config::Config) -> Result<(), CrabError> {
-    let manager = Manager::new();
+    let provider = ServiceProvider::new(&cfg.node_id, cfg.tls);
     let api_worker = BaseApiWorker(
         cfg.endpoint.bind_address.clone(),
         vec![
             Arc::new(EndpointApiWorker::new()),
-            Arc::new(CtrlWorker::new(manager.clone())),
+            Arc::new(CtrlWorker::new(provider.clone())),
         ],
     );
-    let proto = protocol::AppProtocol::new(&cfg.node_id, manager);
+    let proto = protocol::AppProtocol::new(provider.clone());
     let local_node = Arc::new(create_local_endpoint(
-        TLSProvider::from_config(cfg.tls),
+        provider.tls_provider(),
         cfg.endpoint,
         proto,
     )?);

@@ -1,5 +1,6 @@
 use super::types::{Command, CommandHandler};
 use crate::app::Manager;
+use crate::app::provider::ServiceProvider;
 use crate::app::types::Handshake;
 use async_trait::async_trait;
 use crab::proto::{MessageHeader, Protocol, Stream};
@@ -7,15 +8,13 @@ use crab::{CrabError, Handle, NodeMetadata};
 use tokio_util::sync::CancellationToken;
 
 pub struct AppProtocol {
-    device_id: String,
+    provider: ServiceProvider,
     manager: Manager,
 }
 impl AppProtocol {
-    pub fn new(device_id: &str, manager: Manager) -> Self {
-        Self {
-            device_id: device_id.to_string(),
-            manager,
-        }
+    pub fn new(provider: ServiceProvider) -> Self {
+        let manager = provider.manager();
+        AppProtocol { provider, manager }
     }
 }
 #[async_trait]
@@ -25,7 +24,7 @@ impl Protocol for AppProtocol {
 
     type Command = Command;
     fn make_handshake(&self) -> Result<Self::Handshake, CrabError> {
-        Ok(Handshake::new(&self.device_id))
+        Ok(Handshake::new(self.provider.local_node_id()))
     }
 
     fn make_heartbeat(&self) -> Result<Self::Heartbeat, CrabError> {
@@ -68,6 +67,8 @@ impl Protocol for AppProtocol {
         stream: Stream,
     ) -> Result<(), CrabError> {
         log::debug!("Received command: {}", cmd);
-        Box::new(cmd).handle(cancel, header, stream).await
+        Box::new(cmd)
+            .handle(cancel, self.provider.clone(), header, stream)
+            .await
     }
 }

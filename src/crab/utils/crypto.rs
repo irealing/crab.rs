@@ -55,12 +55,12 @@ impl Default for Config {
     }
 }
 pub struct TLSProvider {
-    cfg: Config,
+    cfg: Arc<Config>,
 }
 
 impl TLSProvider {
     pub fn from_config(cfg: Config) -> Self {
-        Self { cfg }
+        Self { cfg: Arc::new(cfg) }
     }
     pub fn from_default_config_file() -> Self {
         Self::from_config(Config::load_default_config_file())
@@ -114,6 +114,16 @@ impl TLSProvider {
             Ok(builder.with_client_auth_cert(self.load_cert()?, self.load_priv_key()?)?)
         } else {
             Ok(builder.with_no_client_auth())
+        }
+    }
+    pub fn configure(&self) -> &Config {
+        &self.cfg
+    }
+}
+impl Clone for TLSProvider {
+    fn clone(&self) -> Self {
+        Self {
+            cfg: self.cfg.clone(),
         }
     }
 }

@@ -4,6 +4,7 @@ use super::super::types::Handshake;
 use super::super::workers::ApiWorker;
 use super::super::workers::types::Ret;
 use super::types::StreamResponse;
+use crate::app::ServiceProvider;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -19,11 +20,11 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use tokio_util::sync::CancellationToken;
 
 pub struct CtrlWorker {
-    manager: Manager,
+    provider: ServiceProvider,
 }
 impl CtrlWorker {
-    pub(crate) fn new(m: Manager) -> Self {
-        Self { manager: m }
+    pub(crate) fn new(m: ServiceProvider) -> Self {
+        Self { provider: m }
     }
 }
 #[async_trait::async_trait]
@@ -41,7 +42,7 @@ impl ApiWorker for CtrlWorker {
             .route("/{node_id}/dir", delete(node_remove_dir))
             .route("/{node_id}/file", get(read_node_file))
             .route("/{node_id}/file", post(node_write_file))
-            .with_state(self.manager.clone())
+            .with_state(self.provider.manager())
     }
     fn tag(&self) -> &str {
         "ctrl"

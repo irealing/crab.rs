@@ -1,10 +1,12 @@
 use super::commands::{DeleteCommand, FileMetadata, ReadFile, WriteFile};
+use crate::app::ServiceProvider;
 use crab::CrabError;
 use crab::proto::{Executor, MessageHeader, Stream, TaskHandle};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use tokio_util::sync::CancellationToken;
+
 #[derive(Deserialize, Serialize)]
 pub enum Command {
     Ping,
@@ -66,6 +68,7 @@ pub trait CommandHandler: Send {
     async fn handle(
         self: Box<Self>,
         _: CancellationToken,
+        _: ServiceProvider,
         _: MessageHeader,
         _: Stream,
     ) -> Result<(), CrabError>;
@@ -75,6 +78,7 @@ impl CommandHandler for Command {
     async fn handle(
         self: Box<Self>,
         cancel: CancellationToken,
+        provider: ServiceProvider,
         header: MessageHeader,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
@@ -92,7 +96,7 @@ impl CommandHandler for Command {
         };
         if let Some(handler) = handler {
             handler
-                .handle(cancel, header, stream)
+                .handle(cancel, provider, header, stream)
                 .await
                 .inspect_err(|e| log::warn!("handle command error: {}", e))
         } else {
@@ -111,7 +115,11 @@ impl CommandHandler for Command {
 #[async_trait::async_trait]
 pub trait SimpleCommandHandler: DeserializeOwned + Send + 'static {
     type Response: Serialize + Send;
-    async fn make_response(self, _: CancellationToken) -> Result<Self::Response, CrabError>;
+    async fn make_response(
+        self,
+        _: CancellationToken,
+        _: ServiceProvider,
+    ) -> Result<Self::Response, CrabError>;
 }
 #[async_trait::async_trait]
 impl<C, T> CommandHandler for C
@@ -122,11 +130,12 @@ where
     async fn handle(
         self: Box<Self>,
         c: CancellationToken,
+        provider: ServiceProvider,
         h: MessageHeader,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
         let this = *self;
-        match this.make_response(c.clone()).await {
+        match this.make_response(c.clone(), provider.clone()).await {
             Ok(resp) => stream.write_message(h.method, h.option, &resp).await,
             Err(err) => stream.write_error(h.method, h.option, &err).await,
         }

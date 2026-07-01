@@ -1,4 +1,5 @@
-use crate::app::protocol::types::{CommandHandler, SimpleCommandHandler};
+use crate::app::ServiceProvider;
+use super::types::{CommandHandler, SimpleCommandHandler};
 use crate::app::protocol::util::generate_temp_path;
 use crab::CrabError;
 use crab::proto::{AckMessage, MessageHeader, Stream};
@@ -17,7 +18,11 @@ pub struct DeleteCommand {
 #[async_trait::async_trait]
 impl SimpleCommandHandler for DeleteCommand {
     type Response = AckMessage;
-    async fn make_response(self, _: CancellationToken) -> Result<Self::Response, CrabError> {
+    async fn make_response(
+        self,
+        _: CancellationToken,
+        _: ServiceProvider,
+    ) -> Result<Self::Response, CrabError> {
         let ret = if self.dir {
             fs::remove_dir_all(&self.path).await
         } else {
@@ -60,6 +65,7 @@ impl CommandHandler for ReadFile {
     async fn handle(
         self: Box<Self>,
         cancel: CancellationToken,
+        _: ServiceProvider,
         h: MessageHeader,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
@@ -139,6 +145,7 @@ impl CommandHandler for WriteFile {
     async fn handle(
         self: Box<Self>,
         cancel: CancellationToken,
+        _: ServiceProvider,
         header: MessageHeader,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
