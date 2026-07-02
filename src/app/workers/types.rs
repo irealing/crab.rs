@@ -54,14 +54,12 @@ where
 }
 pub enum StreamResponse {
     Error(Ret<()>),
-    OK(Body),
     File((FileMetadata, Body)),
 }
 impl IntoResponse for StreamResponse {
     fn into_response(self) -> Response {
         match self {
             StreamResponse::Error(ret) => ret.into_response(),
-            StreamResponse::OK(body) => body.into_response(),
             StreamResponse::File((metadata, body)) => (
                 [
                     (header::CONTENT_TYPE, "application/octet-stream"),

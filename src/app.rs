@@ -6,4 +6,4 @@ pub mod types;
 pub mod workers;
 
 pub use manager::Manager;
-pub use provider::{HyperClient, ServiceProvider};
+pub use provider::ServiceProvider;
