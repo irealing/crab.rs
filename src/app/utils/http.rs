@@ -1,12 +1,12 @@
 use bytes::Bytes;
-use crab::CrabError;
 use crab::utils::crypto::TLSProvider;
+use crab::CrabError;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Incoming;
-use hyper::{Request, Response};
+use hyper::Request;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::{Client, Error};
+use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -68,9 +68,6 @@ impl HttpClient {
         Ok(Self {
             inner: Arc::new(Client::builder(TokioExecutor::new()).build(https)),
         })
-    }
-    pub async fn do_request(&self, req: Request<RequestBody>) -> Result<Response<Incoming>, Error> {
-        self.inner.request(req).await
     }
     pub async fn request(
         &self,

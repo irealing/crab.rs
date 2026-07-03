@@ -15,7 +15,32 @@ pub trait Executor: Send + 'static {
     type Output: Send + 'static;
     async fn execute(self, _: CancellationToken, _: Stream) -> Result<Self::Output, CrabError>;
 }
-
+pub struct BaseAsyncTask<E: Executor> {
+    executor: E,
+}
+impl<E> BaseAsyncTask<E>
+where
+    E: Executor<Output = ()>,
+{
+    pub fn new(executor: E) -> Self {
+        Self { executor }
+    }
+}
+#[async_trait::async_trait]
+impl<E> AsyncTask for BaseAsyncTask<E>
+where
+    E: Executor<Output = ()>,
+{
+    async fn execute(
+        self: Box<Self>,
+        cancel: CancellationToken,
+        stream: Stream,
+    ) -> Result<(), CrabError> {
+        let this = *self;
+        this.executor.execute(cancel, stream).await?;
+        Ok(())
+    }
+}
 pub struct AsyncJob<T, CE> {
     pub callback: CE,
     pub tx: oneshot::Sender<Result<T, CrabError>>,

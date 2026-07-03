@@ -1,6 +1,7 @@
 use super::proto::{AsyncJob, AsyncTask, Executor, MultiStageTask};
 use super::types::{NodeMetadata, NodeStatus};
 use super::{CrabError, Node};
+use crate::proto::BaseAsyncTask;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::net::SocketAddr;
@@ -29,6 +30,16 @@ impl Handle {
                 cmd_tx,
             }),
         }
+    }
+    async fn send_task<T>(&self, task: T) -> Result<(), CrabError>
+    where
+        T: AsyncTask,
+    {
+        self.inner
+            .cmd_tx
+            .send(Box::new(task))
+            .await
+            .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))
     }
     pub async fn exec<CE, T>(&self, callback: CE) -> Result<T, CrabError>
     where
@@ -64,6 +75,12 @@ impl Handle {
         initial_rx
             .await
             .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?
+    }
+    pub async fn exec_base<E>(&self, executor: E) -> Result<(), CrabError>
+    where
+        E: Executor<Output = ()>,
+    {
+        self.send_task(BaseAsyncTask::new(executor)).await
     }
 }
 impl Clone for Handle {
