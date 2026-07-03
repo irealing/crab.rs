@@ -97,6 +97,9 @@ pub struct Stream {
     pub reader: RecvStream,
 }
 impl Stream {
+    pub fn split(self) -> (SendStream, RecvStream) {
+        (self.writer, self.reader)
+    }
     #[inline]
     pub async fn read_message<T: DeserializeOwned>(
         &mut self,

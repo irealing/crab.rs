@@ -52,6 +52,31 @@ impl Worker for WaitExitWorker {
         self.worker.serve(token).await
     }
 }
+#[async_trait::async_trait]
+pub trait InvokeWithCancel<T>
+where
+    T: Send,
+{
+    async fn invoke(self, _: CancellationToken) -> Result<T, CrabError>;
+}
+#[async_trait::async_trait]
+impl<F, Fut, T> InvokeWithCancel<T> for F
+where
+    F: FnOnce() -> Fut + Send,
+    Fut: Future<Output = Result<T, CrabError>> + Send,
+    T: Send,
+{
+    async fn invoke(self, cancel: CancellationToken) -> Result<T, CrabError> {
+        tokio::select! {
+            _=cancel.cancelled()=>{
+                Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
+            }
+            ret=self()=>{
+                ret
+            }
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
