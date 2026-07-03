@@ -8,6 +8,7 @@ use crate::app::ServiceProvider;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
+use axum::http::Request;
 use axum::routing::{delete, get, post};
 use crab::CrabError;
 use crab::proto::{ExecutorWrapper, Stream};
@@ -172,3 +173,6 @@ async fn node_write_file(
         Err(_) => Ret::error(CrabError::ErrorCode(CrabError::CANCELED_ERROR)),
     }
 }
+const HEADER_X_TARGET_URL: &str = "X-Target-URL";
+const HEADER_X_NODE_ID: &str = "X-Node-ID";
+async fn http_proxy(req: Request<Body>) {}

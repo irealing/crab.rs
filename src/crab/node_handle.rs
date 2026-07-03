@@ -31,6 +31,7 @@ impl Handle {
             }),
         }
     }
+    #[inline]
     async fn send_task<T>(&self, task: T) -> Result<(), CrabError>
     where
         T: AsyncTask,
@@ -48,11 +49,7 @@ impl Handle {
     {
         let (tx, rx) = oneshot::channel();
         let job = AsyncJob { callback, tx };
-        self.inner
-            .cmd_tx
-            .send(Box::new(job))
-            .await
-            .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?;
+        self.send_task(job).await?;
         rx.await
             .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?
     }
@@ -67,11 +64,7 @@ impl Handle {
     {
         let (initial_tx, initial_rx) = oneshot::channel();
         let task = MultiStageTask { initial_tx, cmd };
-        self.inner
-            .cmd_tx
-            .send(Box::new(task))
-            .await
-            .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?;
+        self.send_task(task).await?;
         initial_rx
             .await
             .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?
