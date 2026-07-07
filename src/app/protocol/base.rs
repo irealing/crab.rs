@@ -74,19 +74,26 @@ impl CommandExecutor for Handle {
         }
     }
 }
-async fn do_http_request_proxy<'a,B>(
+async fn do_http_request_proxy<'a, B>(
     cancel: CancellationToken,
     (req, mut body): (HttpRequest, B),
     mut stream: Stream,
     resp_writer: oneshot::Sender<Result<(HttpResponse, DuplexStream), CrabError>>,
 ) -> Result<(), CrabError>
 where
-    B: AsyncRead + Unpin + Send +'static,
+    B: AsyncRead + Unpin + Send + 'static,
 {
     stream
-        .write_message(Method::Command, MessageHeader::OPTION_NONE, &req)
+        .write_message(
+            Method::Command,
+            MessageHeader::OPTION_NONE,
+            &Command::HttpProxy(req),
+        )
         .await?;
-    stream.read_ack().await?;
+    stream
+        .read_ack()
+        .await
+        .inspect_err(|e| log::debug!("read ack failed {}", e))?;
     let (mut writer, mut reader) = stream.split();
     let req_cancel = cancel.clone();
     let req_fut = tokio::spawn(async move {

@@ -9,7 +9,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use tokio::io::{AsyncRead, DuplexStream};
-use tokio_util::io::ReaderStream;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Serialize)]

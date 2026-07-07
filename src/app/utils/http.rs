@@ -1,12 +1,12 @@
 use bytes::Bytes;
-use crab::utils::crypto::TLSProvider;
 use crab::CrabError;
+use crab::utils::crypto::TLSProvider;
 use http_body_util::combinators::BoxBody;
-use hyper::body::Incoming;
 use hyper::Request;
+use hyper::body::Incoming;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -37,6 +37,22 @@ impl From<HttpMethod> for hyper::Method {
             HttpMethod::Trace => hyper::Method::TRACE,
             HttpMethod::Connect => hyper::Method::CONNECT,
             HttpMethod::Patch => hyper::Method::PATCH,
+        }
+    }
+}
+impl TryFrom<&str> for HttpMethod {
+    type Error = CrabError;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "GET" => Ok(HttpMethod::Get),
+            "POST" => Ok(HttpMethod::Post),
+            "PUT" => Ok(HttpMethod::Put),
+            "DELETE" => Ok(HttpMethod::Delete),
+            "HEAD" => Ok(HttpMethod::Head),
+            "TRACE" => Ok(HttpMethod::Trace),
+            "CONNECT" => Ok(HttpMethod::Connect),
+            "PATCH" => Ok(HttpMethod::Patch),
+            &_ => Err(CrabError::ErrorCode(CrabError::BAD_PARAMETER)),
         }
     }
 }
@@ -102,6 +118,7 @@ impl HttpClient {
                 builder = builder.header(k, v);
             }
         }
+        builder = builder.uri(req.request_uri);
         Ok(builder.body(body).map_err(|err| {
             log::error!("failed to make http request {}", err);
             CrabError::ErrorCode(CrabError::BAD_PARAMETER)
