@@ -2,11 +2,13 @@ use super::super::utils::http::HttpRequest;
 use super::commands::{DeleteCommand, FileMetadata, ReadFile, WriteFile};
 use super::http::HttpProxyHandler;
 use crate::app::ServiceProvider;
+use crate::app::utils::http::HttpResponse;
 use crab::CrabError;
 use crab::proto::{Executor, MessageHeader, Stream, TaskHandle};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use tokio::io::{AsyncRead, DuplexStream};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Serialize)]
@@ -67,6 +69,13 @@ pub trait CommandExecutor {
     async fn write_file<E>(&self, _: WriteFile) -> TaskHandle<E, ()>
     where
         E: Executor<Output = ()>;
+    /// 发起HTTP代理请求
+    async fn http_proxy<B>(
+        &self,
+        _: (HttpRequest, B),
+    ) -> Result<(HttpResponse, DuplexStream), CrabError>
+    where
+        B: AsyncRead + Unpin + Send + 'static;
 }
 /// 处理远程节点发送的命令
 #[async_trait::async_trait]

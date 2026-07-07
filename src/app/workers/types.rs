@@ -1,10 +1,12 @@
 use super::super::protocol::FileMetadata;
+use crate::app::utils::http::HttpResponse;
 use axum::Json;
 use axum::body::Body;
-use axum::http::header;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use crab::CrabError;
 use serde::Serialize;
+
 #[derive(Serialize)]
 pub struct Ret<D: Serialize> {
     pub err_no: u32,
@@ -71,6 +73,42 @@ impl IntoResponse for StreamResponse {
                 body,
             )
                 .into_response(),
+        }
+    }
+}
+pub enum ProxyResponse {
+    Err((u16, CrabError)),
+    Ok((HttpResponse, Body)),
+}
+impl IntoResponse for ProxyResponse {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Err((status, err)) => {
+                let body: Ret<()> = Ret::error(err);
+                (
+                    StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                    Json(body),
+                )
+                    .into_response()
+            }
+            Self::Ok((header, body)) => {
+                let mut resp_headers = HeaderMap::new();
+                for (key, value) in header.headers {
+                    if let (Ok(name), Ok(val)) = (
+                        HeaderName::from_bytes(key.as_bytes()),
+                        HeaderValue::from_str(&value),
+                    ) {
+                        resp_headers.insert(name, val);
+                    }
+                }
+                (
+                    StatusCode::from_u16(header.status_code)
+                        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                    resp_headers,
+                    body,
+                )
+                    .into_response()
+            }
         }
     }
 }
