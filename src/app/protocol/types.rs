@@ -76,7 +76,7 @@ pub trait CommandExecutor {
         _: (HttpRequest, B),
     ) -> Result<(HttpResponse, DuplexStream), CrabError>
     where
-        B: AsyncRead + Send;
+        B: AsyncRead + Unpin + Send + 'static;
 }
 /// 处理远程节点发送的命令
 #[async_trait::async_trait]
