@@ -111,7 +111,7 @@ where
     });
     let mut body_writer = match reader.read_message::<HttpResponse>().await {
         Ok((_, resp)) => {
-            let (body_writer, body_reader) = duplex(4096);
+            let (body_writer, body_reader) = duplex(1024 * 16);
             resp_writer
                 .send(Ok((resp, body_reader)))
                 .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?;

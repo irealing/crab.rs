@@ -45,7 +45,8 @@ impl ApiWorker for CtrlWorker {
             .route("/{node_id}/dir", delete(node_remove_dir))
             .route("/{node_id}/file", get(read_node_file))
             .route("/{node_id}/file", post(node_write_file))
-            .route("/proxy/{*target_path}", any(http_proxy))
+            .route("/{node_id}/proxy", any(http_proxy))
+            .route("/{node_id}/proxy/{*target_path}", any(http_proxy))
             .with_state(self.provider.manager())
     }
     fn tag(&self) -> &str {
@@ -176,47 +177,50 @@ async fn node_write_file(
         Err(_) => Ret::error(CrabError::ErrorCode(CrabError::CANCELED_ERROR)),
     }
 }
-const HEADER_X_TARGET_URL: &str = "X-Target-URL";
-const HEADER_X_NODE_ID: &str = "X-Node-ID";
+const HEADER_X_TARGET_HOST: &str = "X-Target-Host";
 const HEADER_HOST: &str = "Host";
+#[derive(Deserialize)]
+struct ProxyRequest {
+    node_id: String,
+    target_path: Option<String>,
+}
 async fn http_proxy(
     State(m): State<Manager>,
-    Path(target_path): Path<String>,
+    mut proxy_req: Path<ProxyRequest>,
     req: Request<Body>,
 ) -> ProxyResponse {
-    let (Some(node_id), Some(target_url)) = (
-        req.headers()
-            .get(HEADER_X_NODE_ID)
-            .and_then(|v| v.to_str().ok()),
-        req.headers()
-            .get(HEADER_X_TARGET_URL)
-            .and_then(|v| v.to_str().ok()),
-    ) else {
+    let Some(target_url) = req
+        .headers()
+        .get(HEADER_X_TARGET_HOST)
+        .and_then(|v| v.to_str().ok())
+    else {
         return ProxyResponse::Err((400, CrabError::ErrorCode(CrabError::BAD_PARAMETER)));
     };
-
-    let url = match Url::parse(target_url) {
+    let mut url = match Url::parse(target_url) {
         Ok(url) => url,
         Err(e) => {
             return ProxyResponse::Err((400, CrabError::ErrorCodeWithMessage(400, e.to_string())));
         }
     };
-    let mut url = match url.join(&target_path) {
-        Ok(url) => url,
-        Err(err) => {
-            return ProxyResponse::Err((
-                400,
-                CrabError::ErrorCodeWithMessage(400, err.to_string()),
-            ));
-        }
-    };
+    if let Some(path) = proxy_req.target_path.take() {
+        url = match url.join(&path) {
+            Ok(url) => url,
+            Err(err) => {
+                return ProxyResponse::Err((
+                    400,
+                    CrabError::ErrorCodeWithMessage(400, err.to_string()),
+                ));
+            }
+        };
+    }
+
     if let Some(query) = req.uri().query() {
         url.set_query(Some(&query));
     }
     let Ok(method) = req.method().as_str().try_into() else {
         return ProxyResponse::Err((400, CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR)));
     };
-    let exclude_headers = vec![HEADER_X_TARGET_URL, HEADER_X_NODE_ID, HEADER_HOST];
+    let exclude_headers = vec![HEADER_X_TARGET_HOST, HEADER_HOST];
     let http_req = HttpRequest {
         method,
         request_uri: url.to_string(),
@@ -232,8 +236,8 @@ async fn http_proxy(
             })
             .collect(),
     };
-    let Some((handle, _)) = m.get(node_id) else {
-        log::debug!("node {} not found", node_id);
+    let Some((handle, _)) = m.get(&proxy_req.node_id) else {
+        log::debug!("node {} not found", proxy_req.node_id);
         return ProxyResponse::Err((502, CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT)));
     };
     let body_stream = req.into_body().into_data_stream();
