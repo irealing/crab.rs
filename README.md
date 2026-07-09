@@ -28,6 +28,8 @@ Crab.rs 是一个用 Rust 编写的高效且轻量级的异步节点管理框架
 
 `crab`框架允许用户通过实现`crab::proto::Protocol` trait来定义自己的节点管理协议。`Protocol` trait定义了一系列方法，这些方法涵盖了从握手到心跳再到命令处理等关键操作。通过这种方式，开发者能够轻松地为他们的应用定制合适的协议逻辑。
 
+**以下是`Protocol`的定义**
+
 ```rust
 #[async_trait::async_trait]
 pub trait Protocol: Send + Sync {
@@ -70,8 +72,6 @@ pub trait Protocol: Send + Sync {
     }
 }
 ```
-
-查看`protocol`目录下的文件以了解更多关于如何实现自定义协议的信息。
 
 ## 如何构建
 
