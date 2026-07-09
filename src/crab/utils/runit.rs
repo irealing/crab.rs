@@ -117,7 +117,11 @@ mod tests {
         workers.serve(CancellationToken::new()).await.unwrap_err();
     }
 }
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 mod win;
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 pub use win::wait_exit;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::wait_exit;
