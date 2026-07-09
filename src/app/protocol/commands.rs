@@ -46,11 +46,11 @@ impl Into<FileMetadata> for Metadata {
             filesize: self.len(),
             dir: self.is_dir(),
             mtime: self
-                .accessed()
+                .modified()
                 .map(|v| v.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64)
                 .unwrap_or_default(),
             atime: self
-                .modified()
+                .accessed()
                 .map(|v| v.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64)
                 .unwrap_or_default(),
         }

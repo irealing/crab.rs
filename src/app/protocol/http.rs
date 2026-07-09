@@ -7,6 +7,7 @@ use futures_util::TryStreamExt;
 use http_body::Frame;
 use http_body_util::BodyExt;
 use http_body_util::StreamBody;
+use tokio::io::AsyncWriteExt;
 use tokio_util::io::{ReaderStream, StreamReader};
 use tokio_util::sync::CancellationToken;
 pub struct HttpProxyHandler {
@@ -69,6 +70,7 @@ impl CommandHandler for HttpProxyHandler {
                 Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
             }
             res=tokio::io::copy(&mut resp_reader, &mut writer) => {
+                let _=writer.shutdown().await;
                 res?;
                 Ok(())
             }

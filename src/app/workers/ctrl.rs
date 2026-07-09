@@ -177,8 +177,8 @@ async fn node_write_file(
         Err(_) => Ret::error(CrabError::ErrorCode(CrabError::CANCELED_ERROR)),
     }
 }
-const HEADER_X_TARGET_HOST: &str = "X-Target-Host";
-const HEADER_HOST: &str = "Host";
+const HEADER_X_TARGET_HOST: &str = "x-target-host";
+const HEADER_HOST: &str = "host";
 #[derive(Deserialize)]
 struct ProxyRequest {
     node_id: String,

@@ -11,6 +11,7 @@ use hyper_util::rt::TokioExecutor;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub type Headers = Vec<(String, String)>;
 #[derive(Copy, Serialize, Deserialize, Clone)]
@@ -76,11 +77,13 @@ pub struct HttpClient {
 impl HttpClient {
     pub fn create(tls: &TLSProvider) -> Result<Self, CrabError> {
         let tls_config = tls.build_client_config()?;
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_connect_timeout(Some(Duration::from_secs(15)));
         let https = HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
             .https_or_http()
             .enable_http2()
-            .build();
+            .wrap_connector(http_connector);
         Ok(Self {
             inner: Arc::new(Client::builder(TokioExecutor::new()).build(https)),
         })
