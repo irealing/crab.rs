@@ -13,10 +13,12 @@ Crab.rs 是一个用 Rust 编写的高效且轻量级的异步节点管理框架
 
 ## 技术实现
 
-### Endpoint 和 Node
+### 概念解释
 
 - **Endpoint**：代表网络中的端点，可以作为服务端监听其他Endpoint连接，也可以作为客户端连接到其他Endpoint。
-- **Node**：是远程Endpoint的一个抽象表示。每个Node与一个特定的远程Endpoint相关联，并提供了与其通信的方法。
+- **Node**：是远程Endpoint的一个抽象表示。
+- **Handle**: Crab.rs使用Actor模式构建，`Handle`用于与Node进行通信。
+
 
 ### 连接过程
 
