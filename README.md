@@ -7,7 +7,7 @@ Crab.rs 是一个用 Rust 编写的高效且轻量级的异步节点管理框架
 ## 主要特点
 
 - **异步架构**：异步优先，核心部分使用纯异步实现，基于[Tokio](https://tokio.rs/)。
-- **QUIC协议**：使用[quinn](https://github.com/quinn-rs/quinn)实现了对QUIC的支持，充分利用。
+- **QUIC协议**：使用[quinn](https://github.com/quinn-rs/quinn)充分利用QUIC特性。
 - **模块化设计**：核心功能由`src/lib.rs`导出，允许开发者轻松地集成和扩展。
 - **应用层**：`src/main.rs`提供了一个基于该框架搭建的产级服务实例，也可用于演示如何集成并使用框架的核心功能。
 
