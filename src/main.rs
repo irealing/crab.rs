@@ -4,6 +4,7 @@ use std::{process::ExitCode, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
 use app::ServiceProvider;
+#[cfg(feature = "api")]
 use app::workers::{BaseApiWorker, CtrlWorker};
 use app::{config, protocol};
 use crab::{
@@ -32,17 +33,18 @@ async fn main() -> ExitCode {
 }
 async fn start(cfg: config::Config) -> Result<(), CrabError> {
     let provider = ServiceProvider::new(&cfg.node_id, cfg.tls)?;
-    let api_worker = BaseApiWorker(
-        cfg.endpoint.bind_address.clone(),
-        vec![Arc::new(CtrlWorker::new(provider.clone()))],
-    );
+    let mut worker: Vec<Arc<dyn Worker>> = Vec::new();
+    #[cfg(feature = "api")]
+    {
+        let api_worker = BaseApiWorker(
+            cfg.endpoint.bind_address,
+            vec![Arc::new(CtrlWorker::new(provider.clone()))],
+        );
+        worker.push(Arc::new(api_worker));
+    }
     let proto = protocol::AppProtocol::new(provider.clone());
-    let local_node = Arc::new(create_local_endpoint(
-        provider.tls_provider(),
-        cfg.endpoint,
-        proto,
-    )?);
-    let worker = vec![local_node as Arc<dyn Worker>, Arc::new(api_worker)];
+    let local_node = create_local_endpoint(provider.tls_provider(), cfg.endpoint, proto)?;
+    worker.push(Arc::new(local_node));
     WaitExitWorker::new(Box::new(worker))
         .serve(CancellationToken::new())
         .await

@@ -1,6 +1,7 @@
 use axum::Router;
 use crab::CrabError;
 use crab::utils::runit::Worker;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -11,12 +12,12 @@ pub trait ApiWorker: Worker {
 }
 struct HttpWorker {
     app: Router,
-    bind_address: String,
+    bind_address: SocketAddr,
 }
 #[async_trait::async_trait]
 impl Worker for HttpWorker {
     async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
-        let listener = TcpListener::bind(&self.bind_address.clone()).await?;
+        let listener = TcpListener::bind(self.bind_address).await?;
         axum::serve(listener, self.app.clone())
             .with_graceful_shutdown(async move { token.cancelled().await })
             .await?;
@@ -24,7 +25,7 @@ impl Worker for HttpWorker {
     }
 }
 
-pub struct BaseApiWorker(pub String, pub Vec<Arc<dyn ApiWorker>>);
+pub struct BaseApiWorker(pub SocketAddr, pub Vec<Arc<dyn ApiWorker>>);
 #[async_trait::async_trait]
 impl Worker for BaseApiWorker {
     async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
@@ -41,7 +42,7 @@ impl Worker for BaseApiWorker {
             .collect::<Vec<Arc<dyn Worker>>>();
         let api_worker = HttpWorker {
             app: router,
-            bind_address: self.0.clone(),
+            bind_address: self.0,
         };
         workers.push(Arc::new(api_worker));
         workers.serve(token).await

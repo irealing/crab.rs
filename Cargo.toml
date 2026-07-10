@@ -38,4 +38,5 @@ http-body = "1.0.1"
 url = { version = "2.5.8", optional = true }
 [features]
 default = []
-bin = ["logforth", "sysinfo", "axum", "dashmap", "futures-util", "hyper", "hyper-util", "hyper-rustls", "url"]
+bin = ["dep:logforth", "dep:sysinfo", "dep:dashmap", "dep:futures-util", "dep:hyper", "dep:hyper-util", "dep:hyper-rustls", "dep:url"]
+api=["bin","dep:axum"]
