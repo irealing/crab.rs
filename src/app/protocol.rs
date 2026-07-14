@@ -5,6 +5,7 @@ mod proto;
 mod types;
 mod util;
 mod http;
+mod tcp;
 
 pub use types::CommandExecutor;
 
