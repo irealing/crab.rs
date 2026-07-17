@@ -15,48 +15,73 @@ pub trait Executor: Send + 'static {
     type Output: Send + 'static;
     async fn execute(self, _: CancellationToken, _: Stream) -> Result<Self::Output, CrabError>;
 }
-pub struct BaseAsyncTask<E: Executor> {
+pub struct BaseAsyncTask<C, E>
+where
+    C: Serialize + Send + Sync + 'static,
+    E: Executor,
+{
+    cmd: C,
     executor: E,
 }
-impl<E> BaseAsyncTask<E>
+impl<C, E> BaseAsyncTask<C, E>
 where
+    C: Serialize + Send + Sync + 'static,
     E: Executor<Output = ()>,
 {
-    pub fn new(executor: E) -> Self {
-        Self { executor }
+    pub fn new(cmd: C, executor: E) -> Self {
+        Self { cmd, executor }
     }
 }
 #[async_trait::async_trait]
-impl<E> AsyncTask for BaseAsyncTask<E>
+impl<C, E> AsyncTask for BaseAsyncTask<C, E>
 where
+    C: Serialize + Send + Sync + 'static,
     E: Executor<Output = ()>,
 {
     async fn execute(
         self: Box<Self>,
         cancel: CancellationToken,
-        stream: Stream,
+        mut stream: Stream,
     ) -> Result<(), CrabError> {
         let this = *self;
+        stream
+            .write_message(Method::Command, MessageHeader::OPTION_NONE, &this.cmd)
+            .await?;
+        stream.read_ack().await?;
         this.executor.execute(cancel, stream).await?;
         Ok(())
     }
 }
-pub struct AsyncJob<T, CE> {
+pub struct AsyncJob<C, T, CE> {
+    pub cmd: C,
     pub callback: CE,
     pub tx: oneshot::Sender<Result<T, CrabError>>,
 }
 #[async_trait::async_trait]
-impl<T, CE> AsyncTask for AsyncJob<T, CE>
+impl<C, T, CE> AsyncTask for AsyncJob<C, T, CE>
 where
+    C: Serialize + Send + Sync + 'static,
     T: Send + 'static,
     CE: Executor<Output = T>,
 {
     async fn execute(
         self: Box<Self>,
         c: CancellationToken,
-        stream: Stream,
+        mut stream: Stream,
     ) -> Result<(), CrabError> {
         let this = *self;
+        stream
+            .write_message(Method::Command, MessageHeader::OPTION_NONE, &this.cmd)
+            .await
+            .inspect_err(|err| {
+                log::warn!("failed to write command message: {}", err);
+            })?;
+        if let Err(err) = stream.read_ack().await.inspect_err(|err| {
+            log::error!("failed to read ack message: {}", err);
+        }) {
+            let _ = this.tx.send(Err(err));
+            return Ok(());
+        }
         let ret = this.callback.execute(c, stream).await;
         if this.tx.send(ret).is_err() {
             log::warn!("AsyncJob receiver dropped");

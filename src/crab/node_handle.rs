@@ -42,13 +42,15 @@ impl Handle {
             .await
             .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))
     }
-    pub async fn exec<CE, T>(&self, callback: CE) -> Result<T, CrabError>
+    /// 调用节点执行命令并通过oneshot等待返回结果
+    pub async fn exec<C, CE, T>(&self, cmd: C, callback: CE) -> Result<T, CrabError>
     where
+        C: Serialize + Send + Sync + 'static,
         CE: Executor<Output = T>,
         T: Send + 'static,
     {
         let (tx, rx) = oneshot::channel();
-        let job = AsyncJob { callback, tx };
+        let job = AsyncJob { cmd, callback, tx };
         self.send_task(job).await?;
         rx.await
             .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?
@@ -69,11 +71,13 @@ impl Handle {
             .await
             .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?
     }
-    pub async fn exec_base<E>(&self, executor: E) -> Result<(), CrabError>
+    /// 发送命令但不等待结果
+    pub async fn spawn<C, E>(&self, cmd: C, executor: E) -> Result<(), CrabError>
     where
+        C: Serialize + Sync + Send + 'static,
         E: Executor<Output = ()>,
     {
-        self.send_task(BaseAsyncTask::new(executor)).await
+        self.send_task(BaseAsyncTask::new(cmd, executor)).await
     }
 }
 impl Clone for Handle {

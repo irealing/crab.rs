@@ -1,33 +1,30 @@
 use super::super::ServiceProvider;
-use super::super::utils::http::{HttpRequest,HttpResponse};
+use super::super::utils::http::{HttpRequest, HttpResponse};
 use super::commands::{DeleteCommand, FileMetadata, ReadFile, WriteFile};
-use super::tcp::{TCPForwardRequest, TCPForwarder};
+use super::tcp::{TCPForwarder, TcpForwardParams};
 use crab::CrabError;
-use crab::proto::{Executor, MessageHeader, Stream, TaskHandle};
+use crab::proto::{AckMessage, Executor, MessageHeader, Stream, TaskHandle};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use tokio::io::{AsyncRead, DuplexStream};
+use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Serialize)]
 pub enum Command {
     Ping,
-    Pong,
     Delete(DeleteCommand),
     ReadFile(ReadFile),
     WriteFile(WriteFile),
     HttpProxy(HttpRequest),
-    TCPForward(TCPForwardRequest),
+    TCPForward(TcpForwardParams),
 }
 impl Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Command::Ping => {
                 write!(f, "ping")
-            }
-            Command::Pong => {
-                write!(f, "pong")
             }
             Command::Delete(ref delete) => {
                 write!(f, "delete({})", delete.path)
@@ -72,6 +69,9 @@ pub trait CommandExecutor {
     async fn write_file<E>(&self, _: WriteFile) -> TaskHandle<E, ()>
     where
         E: Executor<Output = ()>;
+}
+#[async_trait::async_trait]
+pub trait Forwarder {
     /// 发起HTTP代理请求
     async fn http_proxy<B>(
         &self,
@@ -79,6 +79,12 @@ pub trait CommandExecutor {
     ) -> Result<(HttpResponse, DuplexStream), CrabError>
     where
         B: AsyncRead + Unpin + Send + 'static;
+    async fn tcp_forward(
+        &self,
+        _: CancellationToken,
+        _: TcpForwardParams,
+        _: TcpStream,
+    ) -> Result<(), CrabError>;
 }
 /// 处理远程节点发送的命令
 #[async_trait::async_trait]
@@ -104,10 +110,9 @@ impl CommandHandler for Command {
         let handler: Option<Box<dyn CommandHandler>> = match cmd {
             Command::Ping => {
                 return stream
-                    .write_message(header.method, header.option, &Command::Pong)
+                    .write_message(header.method, header.option, &AckMessage::success())
                     .await;
             }
-            Command::Pong => None,
             Command::Delete(delete) => Some(Box::new(delete)),
             Command::ReadFile(read) => Some(Box::new(read)),
             Command::WriteFile(write) => Some(Box::new(write)),

@@ -45,7 +45,7 @@ impl Protocol for AppProtocol {
         _: &NodeMetadata,
         _: &Self::Heartbeat,
     ) -> Result<Self::Heartbeat, CrabError> {
-        Ok(Command::Pong)
+        Ok(Command::Ping)
     }
     async fn on_node_accepted(
         &self,

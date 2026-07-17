@@ -3,6 +3,7 @@ use std::{process::ExitCode, sync::Arc};
 
 use tokio_util::sync::CancellationToken;
 
+use crate::app::workers::TcpForwarderWorker;
 use app::ServiceProvider;
 #[cfg(feature = "api")]
 use app::workers::{BaseApiWorker, CtrlWorker};
@@ -41,6 +42,11 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
             vec![Arc::new(CtrlWorker::new(provider.clone()))],
         );
         worker.push(Arc::new(api_worker));
+    }
+    if let Some(options) = cfg.tcp {
+        for opt in options {
+            worker.push(Arc::new(TcpForwarderWorker::new(opt, provider.clone())));
+        }
     }
     let proto = protocol::AppProtocol::new(provider.clone());
     let local_node = create_local_endpoint(provider.tls_provider(), cfg.endpoint, proto)?;
