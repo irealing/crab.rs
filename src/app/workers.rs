@@ -1,6 +1,10 @@
+#[cfg(feature = "api")]
 mod ctrl;
-mod types;
+mod forwarder;
+#[cfg(feature = "api")]
 mod workers;
-
+#[cfg(feature = "api")]
 pub use ctrl::CtrlWorker;
-pub use workers::{ApiWorker, BaseApiWorker};
+pub use forwarder::{TcpForwarderOption, TcpForwarderWorker};
+#[cfg(feature = "api")]
+pub use workers::BaseApiWorker;

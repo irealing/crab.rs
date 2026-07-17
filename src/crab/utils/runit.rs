@@ -77,6 +77,7 @@ where
         }
     }
 }
+pub use utils::serve_all_workers;
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -123,5 +124,7 @@ mod win;
 pub use win::wait_exit;
 #[cfg(target_os = "linux")]
 mod linux;
+mod utils;
+
 #[cfg(target_os = "linux")]
 pub use linux::wait_exit;

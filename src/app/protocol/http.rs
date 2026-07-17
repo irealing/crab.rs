@@ -10,11 +10,8 @@ use http_body_util::StreamBody;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::{ReaderStream, StreamReader};
 use tokio_util::sync::CancellationToken;
-pub struct HttpProxyHandler {
-    pub req: HttpRequest,
-}
 #[async_trait::async_trait]
-impl CommandHandler for HttpProxyHandler {
+impl CommandHandler for HttpRequest {
     async fn handle(
         self: Box<Self>,
         cancel: CancellationToken,
@@ -25,10 +22,7 @@ impl CommandHandler for HttpProxyHandler {
         let this = *self;
         let (mut writer, reader) = stream.split();
         let req_body = StreamBody::new(ReaderStream::new(reader).map_ok(Frame::data));
-        let req = match provider
-            .http_client()
-            .make_request(this.req, req_body.boxed())
-        {
+        let req = match provider.http_client().make_request(this, req_body.boxed()) {
             Ok(req) => {
                 writer
                     .write_message(header.method, header.option, &AckMessage::success())

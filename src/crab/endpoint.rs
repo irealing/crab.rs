@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Debug)]
 pub struct EndpointConfig {
-    pub bind_address: String,
+    pub bind_address: SocketAddr,
     #[serde(default)]
     pub listen: bool,
     #[serde(default)]
@@ -391,22 +391,16 @@ impl LocalEndpoint {
                 CrabError::ErrorCode(CrabError::CRYPTO_ERROR)
             })?,
         ));
-        let endpoint = quinn::Endpoint::server(
-            server_config,
-            cfg.bind_address.parse().map_err(|e| {
-                log::error!("parse listen addr error {}", e);
-                CrabError::ErrorCode(CrabError::PARSE_ERROR)
-            })?,
-        )
-        .map_err(|err| {
-            log::info!("listen on {} error {}", cfg.bind_address, err);
-            err
-        })
-        .map(|e| {
-            let mut e = e;
-            e.set_default_client_config(client_config);
-            e
-        })?;
+        let endpoint = quinn::Endpoint::server(server_config, cfg.bind_address)
+            .map_err(|err| {
+                log::info!("listen on {} error {}", cfg.bind_address, err);
+                err
+            })
+            .map(|e| {
+                let mut e = e;
+                e.set_default_client_config(client_config);
+                e
+            })?;
         let local_addr = endpoint.local_addr()?;
         Ok(LocalEndpoint {
             inner: Arc::new(LocalEndpointInner {
