@@ -10,9 +10,6 @@ use http_body_util::StreamBody;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::{ReaderStream, StreamReader};
 use tokio_util::sync::CancellationToken;
-pub struct HttpProxyHandler {
-    pub req: HttpRequest,
-}
 #[async_trait::async_trait]
 impl CommandHandler for HttpRequest {
     async fn handle(
