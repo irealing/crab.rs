@@ -41,3 +41,5 @@ socket2 = { version = "0.6.4", optional = true }
 default = []
 bin = ["dep:logforth", "dep:sysinfo", "dep:dashmap", "dep:futures-util", "dep:hyper", "dep:hyper-util", "dep:hyper-rustls", "dep:url", "dep:socket2"]
 api = ["bin", "dep:axum"]
+tcp_forward = ["bin"]
+full = ["api", "tcp_forward"]
