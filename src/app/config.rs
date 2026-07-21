@@ -11,7 +11,7 @@ pub struct Config {
     pub endpoint: EndpointConfig,
     pub tls: TLSConfig,
     #[cfg(feature = "tcp_forward")]
-    pub tcp: Option<Vec<TcpForwarderOption>>,
+    pub tcp_forward: Option<Vec<TcpForwarderOption>>,
 }
 impl FromStr for Config {
     type Err = CrabError;

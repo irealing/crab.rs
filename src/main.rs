@@ -45,7 +45,7 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
     }
     #[cfg(feature = "tcp_forward")]
     {
-        if let Some(options) = cfg.tcp {
+        if let Some(options) = cfg.tcp_forward {
             for opt in options {
                 worker.push(Arc::new(TcpForwarderWorker::new(opt, provider.clone())));
             }
