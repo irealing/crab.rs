@@ -34,7 +34,7 @@ listen = true                      listen = false
                            QUIC 加密隧道
                           [Crab B] → 内网服务 :80
 ```
-
+ 
 ## 命令
 
 | 命令 | 作用 |
@@ -57,10 +57,10 @@ listen = true                      listen = false
 配置 TCP 转发规则后，Crab 会在本地监听一个端口，进来的连接通过 QUIC 隧道送到对端，由对端连接到目标地址：
 
 ```toml
-[[tcp]]
+[[tcp_forward]]
 listen = "127.0.0.1:8080"      # 本机监听的端口
 target = "b-host"              # 对端实例的 node_id
-[tcp.params]
+[tcp_forward.params]
 target_address = "10.0.0.1:80"  # 对端要连接的内网地址
 connect_timeout = 5
 keepalive_timeout = 60
@@ -77,16 +77,16 @@ keepalive_retries = 3
 多规则示例：
 
 ```toml
-[[tcp]]
+[[tcp_forward]]
 listen = "127.0.0.1:2222"
 target = "jump-box"
-[tcp.params]
+[tcp_forward.params]
 target_address = "192.168.1.1:22"
 
-[[tcp]]
+[[tcp_forward]]
 listen = "127.0.0.1:3306"
 target = "db-node"
-[tcp.params]
+[tcp_forward.params]
 target_address = "10.0.0.5:3306"
 ```
 
@@ -220,7 +220,7 @@ cert = "cert.pem"
 ```
 
 ```bash
-cargo run --features bin
+cargo run --features full
 ```
 
 ### 3. 启动 B（连接模式）
@@ -246,14 +246,15 @@ cargo run --features bin -- --config b.toml
 B 启动后会自动连到 A，握手完成双方状态变为 `Running`。
 
 ### 4. TCP 转发
+#### 端口转发
 
 在 A 的配置里追加：
 
 ```toml
-[[tcp]]
+[[tcp_forward]]
 listen = "127.0.0.1:8080"
 target = "host-b"
-[tcp.params]
+[tcp_forward.params]
 target_address = "10.0.0.1:80"
 connect_timeout = 5
 keepalive_timeout = 60
@@ -296,23 +297,34 @@ verify_client = false
 | `tls.use_system_ca` | 是否加载系统根证书 |
 | `tls.ca_path` | 额外 CA 证书 |
 | `tls.verify_client` | 是否开启双向 TLS 验证 |
-| `tcp` | TCP 转发规则数组，每一条定义一个本地端口到对端目标的映射 |
+| `tcp_forward` | TCP 转发规则数组，每一条定义一个本地端口到对端目标的映射（需要 `tcp_forward` feature） |
 
 ## 构建
 
+Crab 的 feature 决定了二进制运行时的角色：**被控端**（听命令）和**控制端**（发命令）可以分离打包，也可以合并。
+
 ```bash
-cargo build                          # 仅库
-cargo build --features bin           # 完整二进制（TCP 转发、HTTP 代理）
-cargo build --features api           # 额外开启 HTTP REST API
+cargo build                                            # 仅库（供第三方集成）
+cargo build --features bin                             # 二进制：被控端（接受文件读写、代理等命令）
+cargo build --features bin,tcp_forward                 # 被控端 + TCP 转发控制端
+cargo build --features bin,api                         # 被控端 + HTTP API 控制端
+cargo build --features full                            # 被控端 + 完整控制端能力
 ```
 
 feature 说明：
 
-| Feature | 额外依赖 | 包含功能 |
-|---------|----------|----------|
-| (默认) | 无 | 仅框架库 |
-| `bin` | hyper, hyper-rustls, sysinfo, dashmap, socket2 等 | TCP 转发、HTTP 代理、文件管理 |
-| `api` | axum | HTTP API 管理接口 |
+| Feature | 角色 | 包含功能 |
+|---------|------|----------|
+| (默认) | — | 仅框架库，供第三方程序集成 |
+| `bin` | 被控端 | 接受并执行命令（文件管理、HTTP 代理） |
+| `tcp_forward` | 控制端 | 本地监听端口，转发到被控端内网 |
+| `api` | 控制端 | HTTP API，通过 curl 向被控端发命令 |
+| `full` | 两者 | `bin` + `tcp_forward` + `api`，完整的收发能力 |
+
+典型部署场景：
+
+- **内网机器**（被控端）：`cargo build --features bin`，最小化依赖
+- **公网跳板**（控制端）：`cargo build --features full`，统一管理所有被控端
 
 ## 依赖栈
 
