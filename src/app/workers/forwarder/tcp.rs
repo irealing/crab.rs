@@ -1,6 +1,6 @@
-use super::super::ServiceProvider;
-use super::super::protocol::TcpForwardParams;
-use crate::app::protocol::Forwarder;
+use crate::app::ServiceProvider;
+use crate::app::protocol::TcpForwardParams;
+use crate::app::protocol::TcpForwarder;
 use crab::utils::runit::{Worker, serve_all_workers};
 use crab::{CrabError, Handle};
 use serde::{Deserialize, Serialize};

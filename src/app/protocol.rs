@@ -8,9 +8,11 @@ mod tcp;
 mod types;
 mod util;
 
-pub use types::{CommandExecutor, Forwarder};
+#[cfg(feature = "tcp_forward")]
+pub use types::TcpForwarder;
+pub use types::{CommandExecutor, HttpForwarder};
 
 pub use commands::{FileMetadata, WriteFile};
 pub use proto::AppProtocol;
-
+#[cfg(feature = "tcp_forward")]
 pub use tcp::TcpForwardParams;

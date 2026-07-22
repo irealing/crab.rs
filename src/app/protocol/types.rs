@@ -8,6 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use tokio::io::{AsyncRead, DuplexStream};
+#[cfg(feature = "tcp_forward")]
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
@@ -71,7 +72,7 @@ pub trait CommandExecutor {
         E: Executor<Output = ()>;
 }
 #[async_trait::async_trait]
-pub trait Forwarder {
+pub trait HttpForwarder {
     /// 发起HTTP代理请求
     async fn http_proxy<B>(
         &self,
@@ -79,6 +80,10 @@ pub trait Forwarder {
     ) -> Result<(HttpResponse, DuplexStream), CrabError>
     where
         B: AsyncRead + Unpin + Send + 'static;
+}
+#[cfg(feature = "tcp_forward")]
+#[async_trait::async_trait]
+pub trait TcpForwarder {
     async fn tcp_forward(
         &self,
         _: CancellationToken,

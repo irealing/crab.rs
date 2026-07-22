@@ -1,9 +1,8 @@
 mod app;
 use std::{process::ExitCode, sync::Arc};
 
-use tokio_util::sync::CancellationToken;
-
-use crate::app::workers::TcpForwarderWorker;
+#[cfg(feature = "tcp_forward")]
+use crate::app::workers::forwarder::TcpForwarderWorker;
 use app::ServiceProvider;
 #[cfg(feature = "api")]
 use app::workers::{BaseApiWorker, CtrlWorker};
@@ -12,6 +11,7 @@ use crab::{
     CrabError, create_local_endpoint,
     utils::runit::{WaitExitWorker, Worker},
 };
+use tokio_util::sync::CancellationToken;
 
 const DEFAULT_CONFIG_FILE: &str = "@config.toml";
 #[tokio::main]
@@ -43,9 +43,12 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
         );
         worker.push(Arc::new(api_worker));
     }
-    if let Some(options) = cfg.tcp {
-        for opt in options {
-            worker.push(Arc::new(TcpForwarderWorker::new(opt, provider.clone())));
+    #[cfg(feature = "tcp_forward")]
+    {
+        if let Some(options) = cfg.tcp_forward {
+            for opt in options {
+                worker.push(Arc::new(TcpForwarderWorker::new(opt, provider.clone())));
+            }
         }
     }
     let proto = protocol::AppProtocol::new(provider.clone());

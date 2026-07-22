@@ -1,8 +1,8 @@
 use std::{fs, str::FromStr};
 
 use serde::Deserialize;
-
-use super::workers::TcpForwarderOption;
+#[cfg(feature = "tcp_forward")]
+use super::workers::forwarder::TcpForwarderOption;
 use crab::{CrabError, EndpointConfig, utils::crypto::Config as TLSConfig};
 
 #[derive(Deserialize, Debug)]
@@ -10,7 +10,8 @@ pub struct Config {
     pub node_id: String,
     pub endpoint: EndpointConfig,
     pub tls: TLSConfig,
-    pub tcp: Option<Vec<TcpForwarderOption>>,
+    #[cfg(feature = "tcp_forward")]
+    pub tcp_forward: Option<Vec<TcpForwarderOption>>,
 }
 impl FromStr for Config {
     type Err = CrabError;

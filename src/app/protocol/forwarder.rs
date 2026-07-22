@@ -1,10 +1,15 @@
+#[cfg(feature = "tcp_forward")]
 use super::tcp::tcp_forward;
-use super::types::{Command, Forwarder};
+#[cfg(feature = "tcp_forward")]
+use super::types::TcpForwarder;
+use super::types::{Command, HttpForwarder};
+#[cfg(feature = "tcp_forward")]
 use crate::app::protocol::TcpForwardParams;
 use crate::app::utils::http::{HttpRequest, HttpResponse};
 use crab::proto::{MessageReader, Stream};
 use crab::{CrabError, Handle};
 use tokio::io::{AsyncRead, DuplexStream, duplex};
+#[cfg(feature = "tcp_forward")]
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -64,9 +69,8 @@ where
     let _ = req_fut.await;
     Ok(())
 }
-
 #[async_trait::async_trait]
-impl Forwarder for Handle {
+impl HttpForwarder for Handle {
     async fn http_proxy<B>(
         &self,
         (req, body): (HttpRequest, B),
@@ -88,6 +92,10 @@ impl Forwarder for Handle {
             Err(_) => Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR)),
         }
     }
+}
+#[cfg(feature = "tcp_forward")]
+#[async_trait::async_trait]
+impl TcpForwarder for Handle {
     async fn tcp_forward(
         &self,
         _: CancellationToken,
