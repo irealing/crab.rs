@@ -1,13 +1,13 @@
 use crate::app::ServiceProvider;
 use crate::app::protocol::TcpForwardParams;
 use crate::app::protocol::TcpForwarder;
-use crab::utils::runit::{Worker, serve_all_workers};
-use crab::{CrabError, Handle};
+use crab::CrabError;
+use crab::utils::runit::{OnceRunnerWorker, Worker, serve_all_workers};
 use serde::{Deserialize, Serialize};
 use socket2::{SockRef, TcpKeepalive};
 use std::net::SocketAddr;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex, mpsc};
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TcpForwarderOption {
@@ -53,14 +53,12 @@ impl Worker for TcpForwarderWorker {
                                 log::warn!("tcp-forwarder set_tcp_keepalive error: {}", err);
                                 continue;
                             }
-                            let w=TcpForwardSessionWorker{
-                                session:Mutex::new(Some(TcpForwardSession{
-                                    params:self.options.params,
-                                    stream,
-                                    handle
-                                }))
-                            };
-                            if tx.send(w).await.is_err(){
+                            let params=self.options.params;
+                            let worker=OnceRunnerWorker::from(
+                                async move |cancel:CancellationToken| {
+                                handle.tcp_forward(cancel,params,stream).await
+                            });
+                            if tx.send(worker).await.is_err(){
                                 break;
                             }
                         }
@@ -69,33 +67,5 @@ impl Worker for TcpForwarderWorker {
             }
         }
         workers_handle.await?
-    }
-}
-
-struct TcpForwardSession {
-    params: TcpForwardParams,
-    stream: TcpStream,
-    handle: Handle,
-}
-impl TcpForwardSession {
-    async fn serve(self, token: CancellationToken) -> Result<(), CrabError> {
-        self.handle
-            .tcp_forward(token, self.params, self.stream)
-            .await
-    }
-}
-struct TcpForwardSessionWorker {
-    session: Mutex<Option<TcpForwardSession>>,
-}
-#[async_trait::async_trait]
-impl Worker for TcpForwardSessionWorker {
-    async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
-        let mut guard = self.session.lock().await;
-        let inner = guard.take();
-        drop(guard);
-        match inner {
-            Some(session) => session.serve(token).await,
-            None => Ok(()),
-        }
     }
 }
