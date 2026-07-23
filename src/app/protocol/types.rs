@@ -2,6 +2,7 @@ use super::super::ServiceProvider;
 use super::super::utils::http::{HttpRequest, HttpResponse};
 use super::commands::{DeleteCommand, FileMetadata, ReadFile, WriteFile};
 use super::tcp::{TCPForwarder, TcpForwardParams};
+use super::udp::{UdpForwardParams, UdpForwardHandler};
 use crab::CrabError;
 use crab::proto::{AckMessage, Executor, MessageHeader, Stream, TaskHandle};
 use serde::de::DeserializeOwned;
@@ -19,7 +20,8 @@ pub enum Command {
     ReadFile(ReadFile),
     WriteFile(WriteFile),
     HttpProxy(HttpRequest),
-    TCPForward(TcpForwardParams),
+    TcpForward(TcpForwardParams),
+    UdpForward(UdpForwardParams),
 }
 impl Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -43,8 +45,11 @@ impl Display for Command {
             Command::HttpProxy(ref http_request) => {
                 write!(f, "http_proxy({})", http_request.request_uri)
             }
-            Command::TCPForward(ref tcp_forward) => {
+            Command::TcpForward(ref tcp_forward) => {
                 write!(f, "tcp_forward({})", tcp_forward.target_address)
+            }
+            Command::UdpForward(_) => {
+                write!(f, "udp_forward")
             }
         }
     }
@@ -122,7 +127,8 @@ impl CommandHandler for Command {
             Command::ReadFile(read) => Some(Box::new(read)),
             Command::WriteFile(write) => Some(Box::new(write)),
             Command::HttpProxy(req) => Some(Box::new(req)),
-            Command::TCPForward(req) => Some(Box::new(TCPForwarder::new(req))),
+            Command::TcpForward(req) => Some(Box::new(TCPForwarder::new(req))),
+            Command::UdpForward(req) => Some(Box::new(UdpForwardHandler::new(req))),
         };
         if let Some(handler) = handler {
             handler

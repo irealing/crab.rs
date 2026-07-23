@@ -103,7 +103,7 @@ impl TcpForwarder for Handle {
         conn: TcpStream,
     ) -> Result<(), CrabError> {
         self.exec(
-            Command::TCPForward(param),
+            Command::TcpForward(param),
             async move |cancel: CancellationToken, stream: Stream| -> Result<(), CrabError> {
                 tcp_forward(cancel, stream, conn).await
             },

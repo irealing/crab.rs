@@ -42,6 +42,7 @@ impl CrabError {
     pub const TASK_ACK_FAILED: u32 = 23;
     pub const BAD_PARAMETER: u32 = 24;
     pub const TIMEOUT_ERROR: u32 = 25;
+    pub const NO_ENOUGH_SPACE:u32 = 26;
     pub const ILLEGAL_ERROR: u32 = 0xffff_fffe;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
     pub fn err_no(&self) -> u32 {
@@ -81,6 +82,7 @@ impl CrabError {
                 Self::TASK_ACK_FAILED => "Task ack failure",
                 Self::BAD_PARAMETER => "Bad parameter",
                 Self::TIMEOUT_ERROR => "Timeout error",
+                Self::NO_ENOUGH_SPACE => "No enough space",
                 _ => "Unknown error code",
             },
             _ => "",
