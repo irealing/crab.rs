@@ -11,8 +11,11 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TcpForwarderOption {
+    /// 本地监听地址
     pub listen: SocketAddr,
+    /// 目标代理节点
     pub target: String,
+    /// TCP转发参数
     pub params: TcpForwardParams,
 }
 pub struct TcpForwarderWorker {

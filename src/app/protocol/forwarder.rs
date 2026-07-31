@@ -1,7 +1,7 @@
 #[cfg(feature = "tcp_forward")]
 use super::tcp::tcp_forward;
 #[cfg(feature = "tcp_forward")]
-use super::types::TcpForwarder;
+use super::tcp::TcpForwarder;
 use super::types::{Command, HttpForwarder};
 #[cfg(feature = "tcp_forward")]
 use crate::app::protocol::TcpForwardParams;

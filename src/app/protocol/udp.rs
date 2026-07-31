@@ -1,14 +1,17 @@
 use crate::app::ServiceProvider;
-use crate::app::protocol::types::CommandHandler;
-use bytes::BytesMut;
-use crab::CrabError;
-use crab::proto::{AckMessage, MessageHeader, Stream};
+use crate::app::protocol::types::{Command, CommandHandler};
+use crate::app::protocol::util::IdleTracker;
+use bytes::{Bytes, BytesMut};
+use crab::proto::{Executor, MessageHeader, Stream};
+use crab::{CrabError, Handle};
 use quinn::{RecvStream, SendStream};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::net::UdpSocket;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -26,18 +29,47 @@ pub enum UdpForwardParams {
     IPv4(IPv4Forward),
     IPv6(IPv6Forward),
 }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionOption {
+    pub idle_timeout_sec: u8,
+    pub params: UdpForwardParams,
+}
+pub const UDP_FORWARD_MTU: usize = 1500;
+pub const UDP_FORWARD_MAX_PACKET_SIZE: usize = UDP_FORWARD_MTU + 2;
+const OVER_PACKET_TAG: u16 = 1 << 15;
+const PACKET_LEN_MASK: u16 = 0xffff ^ OVER_PACKET_TAG;
+#[async_trait::async_trait]
+trait PacketReader {
+    async fn read_packet(&mut self, buf: &mut [u8]) -> Result<(usize, bool), CrabError>;
+}
+#[async_trait::async_trait]
+impl PacketReader for RecvStream {
+    async fn read_packet(&mut self, buf: &mut [u8]) -> Result<(usize, bool), CrabError> {
+        let flag = self.read_u16().await?;
+        let size = (flag & PACKET_LEN_MASK) as usize;
+        let over_tag = (flag & OVER_PACKET_TAG) > 0;
+        if size == 0 {
+            return Ok((0, over_tag));
+        }
+        if buf.len() < size {
+            return Err(CrabError::ErrorCode(CrabError::NO_ENOUGH_SPACE));
+        }
+        self.read_exact(&mut buf[..size]).await?;
+        Ok((size, over_tag))
+    }
+}
 pub struct UdpForwardHandler {
     params: UdpForwardParams,
 }
 impl UdpForwardHandler {
-    const MTU: usize = 1500;
-    const BUF_SIZE: usize = Self::MTU + 2;
+    const MTU: usize = UDP_FORWARD_MTU;
+    const BUF_SIZE: usize = UDP_FORWARD_MAX_PACKET_SIZE;
     const OVER_PACKET_TAG: u16 = 1 << 15;
     const PACKET_LEN_MASK: u16 = 0xffff ^ Self::OVER_PACKET_TAG;
     pub fn new(params: UdpForwardParams) -> Self {
         Self { params }
     }
-    async fn prepare_socket(&self) -> Result<UdpSocket, CrabError> {
+    async fn prepare_socket(&self) -> Result<(UdpSocket, SocketAddr), CrabError> {
         let (local_addr, remote_addr) = match self.params {
             UdpForwardParams::IPv4(params) => {
                 let local_addr = if let Some(addr) = params.via {
@@ -58,23 +90,8 @@ impl UdpForwardHandler {
         };
         let sock = UdpSocket::bind(local_addr).await?;
         sock.connect(remote_addr).await?;
-        Ok(sock)
-    }
-    async fn read_packet(
-        stream: &mut RecvStream,
-        buf: &mut [u8],
-    ) -> Result<(usize, bool), CrabError> {
-        let flag = stream.read_u16().await?;
-        let size = (flag & Self::PACKET_LEN_MASK) as usize;
-        let over_tag = (flag & Self::OVER_PACKET_TAG) > 0;
-        if size == 0 {
-            return Ok((0, over_tag));
-        }
-        if buf.len() < size {
-            return Err(CrabError::ErrorCode(CrabError::NO_ENOUGH_SPACE));
-        }
-        stream.read_exact(&mut buf[..size]).await?;
-        Ok((size, over_tag))
+        let local_addr = sock.local_addr()?;
+        Ok((sock, local_addr))
     }
     async fn forward_send(
         cancel: CancellationToken,
@@ -87,7 +104,7 @@ impl UdpForwardHandler {
         loop {
             tokio::select! {
                 _=cancel.cancelled() => {return Ok(ret)},
-                read_ret=Self::read_packet(&mut reader,&mut buf)=>{
+                read_ret=reader.read_packet(&mut buf)=>{
                     let (size,over_tag) = read_ret?;
                     if size>0{
                         ret += size;
@@ -155,9 +172,10 @@ impl CommandHandler for UdpForwardHandler {
     ) -> Result<(), CrabError> {
         let this = *self;
         let sock = match this.prepare_socket().await {
-            Ok(sock) => {
+            Ok((sock, local_addr)) => {
+                log::debug!("UdpForwardHandler use local address: {}", local_addr);
                 stream
-                    .write_message(header.method, header.option, &AckMessage::success())
+                    .write_message(header.method, header.option, &local_addr)
                     .await?;
                 sock
             }
@@ -169,5 +187,149 @@ impl CommandHandler for UdpForwardHandler {
             }
         };
         Self::forward(cancel, stream, sock).await
+    }
+}
+#[async_trait::async_trait]
+pub trait UdpPacketWriter: Send {
+    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<usize, CrabError>;
+}
+#[async_trait::async_trait]
+impl UdpPacketWriter for Arc<UdpSocket> {
+    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<usize, CrabError> {
+        let size = UdpSocket::send_to(self, buf, addr).await?;
+        Ok(size)
+    }
+}
+pub struct UdpForwarderHandle {
+    sender: mpsc::Sender<Bytes>,
+    via: SocketAddr,
+}
+impl UdpForwarderHandle {
+    pub async fn send(&self, data: Bytes) -> Result<(), CrabError> {
+        self.sender
+            .send(data)
+            .await
+            .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?;
+        Ok(())
+    }
+    pub fn close(self) {
+        drop(self.sender);
+    }
+    pub fn is_closed(&self) -> bool {
+        self.sender.is_closed()
+    }
+    pub fn relay_address(&self) -> SocketAddr {
+        self.via
+    }
+}
+#[async_trait::async_trait]
+pub trait UdpForwarder {
+    async fn udp_forward<T>(
+        &self,
+        _: CancellationToken,
+        _: SessionOption,
+        _: SocketAddr,
+        _: T,
+    ) -> Result<UdpForwarderHandle, CrabError>
+    where
+        T: UdpPacketWriter + 'static;
+}
+#[async_trait::async_trait]
+impl UdpForwarder for Handle {
+    async fn udp_forward<T>(
+        &self,
+        _: CancellationToken,
+        opt: SessionOption,
+        src: SocketAddr,
+        udp_writer: T,
+    ) -> Result<UdpForwarderHandle, CrabError>
+    where
+        T: UdpPacketWriter + 'static,
+    {
+        let (handle_tx, handle_rx) = oneshot::channel::<Result<UdpForwarderHandle, CrabError>>();
+        // self.spawn(
+        //     Command::UdpForward(opt.params),
+        //     async move {
+        //     }
+        // )
+        // .await?;
+        handle_rx
+            .await
+            .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?
+    }
+}
+struct UdpForwardExecutor<T> {
+    session_ttl: Duration,
+    handle_tx: oneshot::Sender<Result<UdpForwarderHandle, CrabError>>,
+    udp_writer: T,
+    src: SocketAddr,
+    bytes_rx: mpsc::Receiver<Bytes>,
+}
+impl<T> UdpForwardExecutor<T>
+where
+    T: UdpPacketWriter,
+{
+    async fn stream_to_udp(
+        cancel: CancellationToken,
+        mut stream: RecvStream,
+        udp_writer: T,
+        addr: SocketAddr,
+    ) -> Result<(), CrabError> {
+        let mut buf = BytesMut::with_capacity(UDP_FORWARD_MTU);
+        loop {
+            tokio::select! {
+                _=cancel.cancelled() => {
+                    return Ok(());
+                }
+                recv_ret=stream.read_packet(&mut buf) => {
+                    let (size,over)=recv_ret?;
+                    udp_writer.send_to(&buf[..size],addr).await?;
+                    if over {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+    async fn udp_to_stream(
+        cancel: CancellationToken,
+        mut stream: SendStream,
+        mut bytes_rx: mpsc::Receiver<Bytes>,
+    ) -> Result<(), CrabError> {
+        loop {
+            tokio::select! {
+                _=cancel.cancelled() => {
+                    return Ok(());
+                }
+                packet_ret=bytes_rx.recv() => {
+                    match packet_ret {
+                        None=>{return Ok(())}
+                        Some(data) => {
+                            stream.write_all(&data).await?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+#[async_trait::async_trait]
+impl<T> Executor for UdpForwardExecutor<T>
+where
+    T: UdpPacketWriter + Sync + 'static,
+{
+    type Output = ();
+    async fn execute(
+        mut self,
+        cancel: CancellationToken,
+        stream: Stream,
+    ) -> Result<Self::Output, CrabError> {
+        let (bytes_rx, udp_writer, addr) = (self.bytes_rx, self.udp_writer, self.src);
+        let (reader, writer) = stream.split();
+        let _ = tokio::try_join!(
+            Self::stream_to_udp(cancel.clone(), writer, udp_writer, addr),
+            Self::udp_to_stream(cancel.clone(), reader, bytes_rx)
+        )?;
+        Ok(())
     }
 }

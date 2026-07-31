@@ -1,8 +1,8 @@
 use super::super::ServiceProvider;
 use super::super::utils::http::{HttpRequest, HttpResponse};
 use super::commands::{DeleteCommand, FileMetadata, ReadFile, WriteFile};
-use super::tcp::{TCPForwarder, TcpForwardParams};
-use super::udp::{UdpForwardParams, UdpForwardHandler};
+use super::tcp::{TcpForwardHandler, TcpForwardParams};
+use super::udp::{UdpForwardHandler, UdpForwardParams};
 use crab::CrabError;
 use crab::proto::{AckMessage, Executor, MessageHeader, Stream, TaskHandle};
 use serde::de::DeserializeOwned;
@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use tokio::io::{AsyncRead, DuplexStream};
 #[cfg(feature = "tcp_forward")]
-use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Serialize)]
@@ -86,16 +85,7 @@ pub trait HttpForwarder {
     where
         B: AsyncRead + Unpin + Send + 'static;
 }
-#[cfg(feature = "tcp_forward")]
-#[async_trait::async_trait]
-pub trait TcpForwarder {
-    async fn tcp_forward(
-        &self,
-        _: CancellationToken,
-        _: TcpForwardParams,
-        _: TcpStream,
-    ) -> Result<(), CrabError>;
-}
+
 /// 处理远程节点发送的命令
 #[async_trait::async_trait]
 pub trait CommandHandler: Send {
@@ -127,7 +117,7 @@ impl CommandHandler for Command {
             Command::ReadFile(read) => Some(Box::new(read)),
             Command::WriteFile(write) => Some(Box::new(write)),
             Command::HttpProxy(req) => Some(Box::new(req)),
-            Command::TcpForward(req) => Some(Box::new(TCPForwarder::new(req))),
+            Command::TcpForward(req) => Some(Box::new(TcpForwardHandler::new(req))),
             Command::UdpForward(req) => Some(Box::new(UdpForwardHandler::new(req))),
         };
         if let Some(handler) = handler {
