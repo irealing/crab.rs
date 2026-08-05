@@ -1,6 +1,5 @@
 use crate::app::ServiceProvider;
 use crate::app::protocol::types::{Command, CommandHandler};
-use crate::app::protocol::util::IdleTracker;
 use bytes::{Bytes, BytesMut};
 use crab::proto::{Executor, MessageHeader, Stream};
 use crab::{CrabError, Handle};
@@ -8,7 +7,6 @@ use quinn::{RecvStream, SendStream};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
@@ -201,22 +199,22 @@ impl UdpPacketWriter for Arc<UdpSocket> {
     }
 }
 pub struct UdpForwarderHandle {
-    sender: mpsc::Sender<Bytes>,
+    bytes_tx: mpsc::Sender<Bytes>,
     via: SocketAddr,
 }
 impl UdpForwarderHandle {
     pub async fn send(&self, data: Bytes) -> Result<(), CrabError> {
-        self.sender
+        self.bytes_tx
             .send(data)
             .await
             .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?;
         Ok(())
     }
     pub fn close(self) {
-        drop(self.sender);
+        drop(self.bytes_tx);
     }
     pub fn is_closed(&self) -> bool {
-        self.sender.is_closed()
+        self.bytes_tx.is_closed()
     }
     pub fn relay_address(&self) -> SocketAddr {
         self.via
@@ -232,7 +230,7 @@ pub trait UdpForwarder {
         _: T,
     ) -> Result<UdpForwarderHandle, CrabError>
     where
-        T: UdpPacketWriter + 'static;
+        T: UdpPacketWriter + Send + Sync + 'static;
 }
 #[async_trait::async_trait]
 impl UdpForwarder for Handle {
@@ -244,30 +242,42 @@ impl UdpForwarder for Handle {
         udp_writer: T,
     ) -> Result<UdpForwarderHandle, CrabError>
     where
-        T: UdpPacketWriter + 'static,
+        T: UdpPacketWriter + Send + Sync + 'static,
     {
-        let (handle_tx, handle_rx) = oneshot::channel::<Result<UdpForwarderHandle, CrabError>>();
-        // self.spawn(
-        //     Command::UdpForward(opt.params),
-        //     async move {
-        //     }
-        // )
-        // .await?;
-        handle_rx
+        let (handle_tx, handle_rx) = oneshot::channel::<UdpForwarderHandle>();
+        self.spawn(
+            Command::UdpForward(opt.params),
+            async move |cancel: CancellationToken, stream: Stream| {
+                let (bytes_tx, bytes_rx) = mpsc::channel(10);
+                let session = UdpForwardSession {
+                    udp_writer,
+                    src,
+                    bytes_rx,
+                };
+                let handle = UdpForwarderHandle { bytes_tx, via: src };
+                handle_tx
+                    .send(handle)
+                    .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?;
+                session.execute(cancel, stream).await
+            },
+        )
+        .await?;
+        Ok(handle_rx
             .await
-            .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?
+            .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?)
     }
 }
-struct UdpForwardExecutor<T> {
-    session_ttl: Duration,
-    handle_tx: oneshot::Sender<Result<UdpForwarderHandle, CrabError>>,
+struct UdpForwardSession<T>
+where
+    T: UdpPacketWriter + Send + Sync + 'static,
+{
     udp_writer: T,
     src: SocketAddr,
     bytes_rx: mpsc::Receiver<Bytes>,
 }
-impl<T> UdpForwardExecutor<T>
+impl<T> UdpForwardSession<T>
 where
-    T: UdpPacketWriter,
+    T: UdpPacketWriter + Send + Sync + 'static,
 {
     async fn stream_to_udp(
         cancel: CancellationToken,
@@ -314,13 +324,13 @@ where
     }
 }
 #[async_trait::async_trait]
-impl<T> Executor for UdpForwardExecutor<T>
+impl<T> Executor for UdpForwardSession<T>
 where
-    T: UdpPacketWriter + Sync + 'static,
+    T: UdpPacketWriter + Send + Sync + 'static,
 {
     type Output = ();
     async fn execute(
-        mut self,
+        self,
         cancel: CancellationToken,
         stream: Stream,
     ) -> Result<Self::Output, CrabError> {
