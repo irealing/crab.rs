@@ -40,6 +40,7 @@ listen = true                      listen = false
 | 命令 | 作用 |
 |------|------|
 | `Ping` | 测试连通性 |
+| `ListDir` | 列举目录内容 |
 | `Delete` | 删除文件或目录 |
 | `ReadFile` | 读取文件内容（流式） |
 | `WriteFile` | 写入文件内容（流式） |
@@ -139,6 +140,42 @@ curl http://127.0.0.1:3000/ctrl/node-b
 
 ```bash
 curl http://127.0.0.1:3000/ctrl/node-b/ping
+```
+
+### 列出目录
+
+```bash
+curl "http://127.0.0.1:3000/ctrl/node-b/dir?path=/data"
+```
+
+返回目录下的文件列表：
+
+```json
+{
+  "err_no": 0,
+  "msg": "success",
+  "data": [
+    { "name": "dump.bin", "dir": false },
+    { "name": "logs", "dir": true }
+  ]
+}
+```
+
+`name` 为条目名称，`dir` 表示是否为目录（`true` 为目录）。注意：当**目标节点**是 Windows 时，`path` 传 `/` 或留空会返回磁盘列表：
+
+```bash
+curl "http://127.0.0.1:3000/ctrl/node-b/dir?path=/"
+```
+
+```json
+{
+  "err_no": 0,
+  "msg": "success",
+  "data": [
+    { "name": "C:\\", "dir": false },
+    { "name": "D:\\", "dir": false }
+  ]
+}
 ```
 
 ### 删除文件或目录
