@@ -1,4 +1,4 @@
-use super::commands::{DeleteCommand, FileMetadata, ReadFile};
+use super::commands::{DeleteCommand, DirEntry, DirEntryList, FileMetadata, ReadFile};
 use super::types::{Command, CommandExecutor};
 use crate::app::protocol::WriteFile;
 use crab::proto::{AckMessage, Executor, Stream, TaskHandle};
@@ -39,5 +39,16 @@ impl CommandExecutor for Handle {
             .exec_with_ack::<Command, AckMessage, E>(Command::WriteFile(cmd))
             .await?;
         Ok((sender, ()))
+    }
+    async fn read_dir(&self, path: String) -> Result<Vec<DirEntry>, CrabError> {
+        let (_, ret) = self
+            .exec(
+                Command::Dir(path),
+                async |_: CancellationToken, mut stream: Stream| {
+                    stream.read_message::<DirEntryList>().await
+                },
+            )
+            .await?;
+        Ok(ret.entries)
     }
 }

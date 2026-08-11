@@ -1,6 +1,6 @@
 use super::super::ServiceProvider;
 use super::super::utils::http::{HttpRequest, HttpResponse};
-use super::commands::{DeleteCommand, DirCommand, FileMetadata, ReadFile, WriteFile};
+use super::commands::{DeleteCommand, DirCommand, DirEntry, FileMetadata, ReadFile, WriteFile};
 use super::tcp::{TcpForwardHandler, TcpForwardParams};
 use super::udp::{UdpForwardHandler, UdpForwardParams};
 use crab::CrabError;
@@ -9,7 +9,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use tokio::io::{AsyncRead, DuplexStream};
-#[cfg(feature = "tcp_forward")]
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Serialize)]
@@ -78,6 +77,8 @@ pub trait CommandExecutor {
     async fn write_file<E>(&self, _: WriteFile) -> TaskHandle<E, ()>
     where
         E: Executor<Output = ()>;
+    /// 列举节点文件目录
+    async fn read_dir(&self, _: String) -> Result<Vec<DirEntry>, CrabError>;
 }
 #[async_trait::async_trait]
 pub trait HttpForwarder {

@@ -13,7 +13,7 @@ mod util;
 pub use tcp::TcpForwarder;
 pub use types::{CommandExecutor, HttpForwarder};
 
-pub use commands::{FileMetadata, WriteFile};
+pub use commands::{DirEntry, FileMetadata, WriteFile};
 pub use proto::AppProtocol;
 #[cfg(feature = "tcp_forward")]
 pub use tcp::TcpForwardParams;

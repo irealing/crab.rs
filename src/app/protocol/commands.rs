@@ -275,7 +275,7 @@ impl DirCommand {
 }
 #[derive(Serialize, Deserialize)]
 pub struct DirEntryList {
-    entries: Vec<DirEntry>,
+    pub entries: Vec<DirEntry>,
 }
 #[async_trait::async_trait]
 impl SimpleCommandHandler for DirCommand {

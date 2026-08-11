@@ -4,7 +4,7 @@ use super::super::workers::ApiWorker;
 use super::types::Ret;
 use super::types::{ProxyResponse, StreamResponse};
 use crate::app::ServiceProvider;
-use crate::app::protocol::HttpForwarder;
+use crate::app::protocol::{DirEntry, HttpForwarder};
 use crate::app::types::Handshake;
 use crate::app::utils::http::HttpRequest;
 use axum::Router;
@@ -46,6 +46,7 @@ impl ApiWorker for CtrlWorker {
             .route("/{node_id}/dir", delete(node_remove_dir))
             .route("/{node_id}/file", get(read_node_file))
             .route("/{node_id}/file", post(node_write_file))
+            .route("/{node_id}/dir", get(node_list_dir))
             .route("/{node_id}/proxy", any(http_proxy))
             .route("/{node_id}/proxy/{*target_path}", any(http_proxy))
             .with_state(self.provider.manager())
@@ -176,6 +177,20 @@ async fn node_write_file(
     match err_rx.await {
         Ok(ret) => Ret::from(ret),
         Err(_) => Ret::error(CrabError::ErrorCode(CrabError::CANCELED_ERROR)),
+    }
+}
+type NodePath = ReadNodeFile;
+async fn node_list_dir(
+    State(m): State<Manager>,
+    Path(node_id): Path<String>,
+    Query(param): Query<NodePath>,
+) -> Ret<Vec<DirEntry>> {
+    let Some((h, _)) = m.get(&node_id) else {
+        return Ret::error(CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT));
+    };
+    match h.read_dir(param.path).await {
+        Ok(ret) => Ret::from(ret),
+        Err(err) => Ret::error(err),
     }
 }
 const HEADER_X_TARGET_HOST: &str = "x-target-host";
