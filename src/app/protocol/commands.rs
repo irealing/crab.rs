@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 use tokio::{fs, io};
 use tokio_util::sync::CancellationToken;
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
 
 #[derive(Serialize, Deserialize)]
