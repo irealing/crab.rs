@@ -166,6 +166,9 @@ where
         h: MessageHeader,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
+        stream
+            .write_message(h.method, h.option, &AckMessage::success())
+            .await?;
         let this = *self;
         match this.make_response(c.clone(), provider.clone()).await {
             Ok(resp) => stream.write_message(h.method, h.option, &resp).await,
