@@ -37,10 +37,11 @@ http-body-util = "0.1.3"
 http-body = "1.0.1"
 url = { version = "2.5.8", optional = true }
 socket2 = { version = "0.6.4", optional = true }
+windows-sys = "0.61.2"
 [features]
 default = []
 bin = ["dep:logforth", "dep:sysinfo", "dep:dashmap", "dep:futures-util", "dep:hyper", "dep:hyper-util", "dep:hyper-rustls", "dep:url", "dep:socket2"]
 api = ["bin", "dep:axum"]
 tcp_forward = ["bin"]
 udp_forward = ["bin"]
-full = ["api", "tcp_forward", "udp_forward"]
+full = ["api", "tcp_forward"]

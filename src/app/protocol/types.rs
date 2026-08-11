@@ -1,6 +1,6 @@
 use super::super::ServiceProvider;
 use super::super::utils::http::{HttpRequest, HttpResponse};
-use super::commands::{DeleteCommand, FileMetadata, ReadFile, WriteFile};
+use super::commands::{DeleteCommand, DirCommand, FileMetadata, ReadFile, WriteFile};
 use super::tcp::{TcpForwardHandler, TcpForwardParams};
 use super::udp::{UdpForwardHandler, UdpForwardParams};
 use crab::CrabError;
@@ -17,6 +17,7 @@ pub enum Command {
     Ping,
     Delete(DeleteCommand),
     ReadFile(ReadFile),
+    Dir(String),
     WriteFile(WriteFile),
     HttpProxy(HttpRequest),
     TcpForward(TcpForwardParams),
@@ -40,6 +41,9 @@ impl Display for Command {
                     "write_file({},mkdir={},overwrite={})",
                     write.path, write.mkdir, write.overwrite
                 )
+            }
+            Command::Dir(ref path) => {
+                write!(f, "dir({})", path)
             }
             Command::HttpProxy(ref http_request) => {
                 write!(f, "http_proxy({})", http_request.request_uri)
@@ -116,6 +120,7 @@ impl CommandHandler for Command {
             Command::Delete(delete) => Some(Box::new(delete)),
             Command::ReadFile(read) => Some(Box::new(read)),
             Command::WriteFile(write) => Some(Box::new(write)),
+            Command::Dir(path) => Some(Box::new(DirCommand { path })),
             Command::HttpProxy(req) => Some(Box::new(req)),
             Command::TcpForward(req) => Some(Box::new(TcpForwardHandler::new(req))),
             Command::UdpForward(req) => Some(Box::new(UdpForwardHandler::new(req))),

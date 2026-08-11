@@ -44,6 +44,7 @@ impl CrabError {
     pub const TIMEOUT_ERROR: u32 = 25;
     pub const NO_ENOUGH_SPACE: u32 = 26;
     pub const ALREADY_SERVED: u32 = 27;
+    pub const ENCODING_ERROR: u32 = 28;
     pub const ILLEGAL_ERROR: u32 = 0xffff_fffe;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
     pub fn err_no(&self) -> u32 {
@@ -84,6 +85,7 @@ impl CrabError {
                 Self::BAD_PARAMETER => "Bad parameter",
                 Self::TIMEOUT_ERROR => "Timeout error",
                 Self::NO_ENOUGH_SPACE => "No enough space",
+                Self::ENCODING_ERROR => "Encoding error",
                 Self::ALREADY_SERVED => "Already served",
                 _ => "Unknown error code",
             },

@@ -1,5 +1,5 @@
-use crate::app::ServiceProvider;
 use super::types::{CommandHandler, SimpleCommandHandler};
+use crate::app::ServiceProvider;
 use crate::app::protocol::util::generate_temp_path;
 use crab::CrabError;
 use crab::proto::{AckMessage, MessageHeader, Stream};
@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 use tokio::{fs, io};
 use tokio_util::sync::CancellationToken;
+use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
 
 #[derive(Serialize, Deserialize)]
 pub struct DeleteCommand {
@@ -218,5 +219,73 @@ impl CommandHandler for WriteFile {
         stream
             .write_message(header.method, header.option, &ack)
             .await
+    }
+}
+#[derive(Serialize, Deserialize)]
+pub struct DirCommand {
+    pub path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DirEntry {
+    name: String,
+    dir: bool,
+}
+impl DirCommand {
+    #[cfg(target_os = "windows")]
+    fn list_drives() -> Result<Vec<DirEntry>, CrabError> {
+        let mask = unsafe { GetLogicalDrives() };
+        let mut drives: Vec<DirEntry> = Vec::new();
+        for i in 0..26 {
+            if (mask & (1 << i)) != 0 {
+                drives.push(DirEntry {
+                    name: format!("{}:\\", (b'A' + i) as char),
+                    dir: false,
+                })
+            }
+        }
+        Ok(drives)
+    }
+    #[inline]
+    async fn read_dir(&self) -> Result<Vec<DirEntry>, CrabError> {
+        let mut entries = fs::read_dir(&self.path).await?;
+        let mut ret = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            ret.push(DirEntry {
+                name: entry.file_name().into_string().map_err(|_| {
+                    log::warn!("invalid unicode character in path: {:?}", entry);
+                    CrabError::ErrorCode(CrabError::ENCODING_ERROR)
+                })?,
+                dir: entry.file_type().await?.is_dir(),
+            })
+        }
+        Ok(ret)
+    }
+    #[cfg(target_os = "windows")]
+    async fn list_dir(&self) -> Result<Vec<DirEntry>, CrabError> {
+        if self.path == "" || self.path == "/" {
+            return Self::list_drives();
+        }
+        self.read_dir().await
+    }
+    #[cfg(not(target_os = "windows"))]
+    async fn list_dir(&self) -> Result<Vec<DirEntry>, CrabError> {
+        self.read_dir().await
+    }
+}
+#[derive(Serialize, Deserialize)]
+pub struct DirEntryList {
+    entries: Vec<DirEntry>,
+}
+#[async_trait::async_trait]
+impl SimpleCommandHandler for DirCommand {
+    type Response = DirEntryList;
+    async fn make_response(
+        self,
+        _: CancellationToken,
+        _: ServiceProvider,
+    ) -> Result<Self::Response, CrabError> {
+        let ret = self.list_dir().await?;
+        Ok(DirEntryList { entries: ret })
     }
 }
