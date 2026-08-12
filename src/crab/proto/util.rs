@@ -89,7 +89,8 @@ impl MessageWriter for SendStream {
         err: &CrabError,
     ) -> Result<(), CrabError> {
         let msg = AckMessage::from_error(err);
-        self.write_message(method, option, &msg).await
+        self.write_message(method, option | MessageHeader::OPTION_ERROR, &msg)
+            .await
     }
 }
 pub struct Stream {
