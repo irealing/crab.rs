@@ -1,15 +1,14 @@
 use super::super::ServiceProvider;
 use super::super::utils::http::{HttpRequest, HttpResponse};
-use super::commands::{DeleteCommand, FileMetadata, ReadFile, WriteFile};
-use super::tcp::{TCPForwarder, TcpForwardParams};
+use super::commands::{DeleteCommand, DirCommand, DirEntry, FileMetadata, ReadFile, WriteFile};
+use super::tcp::{TcpForwardHandler, TcpForwardParams};
+use super::udp::{UdpForwardHandler, UdpForwardParams};
 use crab::CrabError;
 use crab::proto::{AckMessage, Executor, MessageHeader, Stream, TaskHandle};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use tokio::io::{AsyncRead, DuplexStream};
-#[cfg(feature = "tcp_forward")]
-use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Serialize)]
@@ -17,9 +16,11 @@ pub enum Command {
     Ping,
     Delete(DeleteCommand),
     ReadFile(ReadFile),
+    Dir(String),
     WriteFile(WriteFile),
     HttpProxy(HttpRequest),
-    TCPForward(TcpForwardParams),
+    TcpForward(TcpForwardParams),
+    UdpForward(UdpForwardParams),
 }
 impl Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,11 +41,17 @@ impl Display for Command {
                     write.path, write.mkdir, write.overwrite
                 )
             }
+            Command::Dir(ref path) => {
+                write!(f, "dir({})", path)
+            }
             Command::HttpProxy(ref http_request) => {
                 write!(f, "http_proxy({})", http_request.request_uri)
             }
-            Command::TCPForward(ref tcp_forward) => {
+            Command::TcpForward(ref tcp_forward) => {
                 write!(f, "tcp_forward({})", tcp_forward.target_address)
+            }
+            Command::UdpForward(_) => {
+                write!(f, "udp_forward")
             }
         }
     }
@@ -70,6 +77,8 @@ pub trait CommandExecutor {
     async fn write_file<E>(&self, _: WriteFile) -> TaskHandle<E, ()>
     where
         E: Executor<Output = ()>;
+    /// 列举节点文件目录
+    async fn read_dir(&self, _: String) -> Result<Vec<DirEntry>, CrabError>;
 }
 #[async_trait::async_trait]
 pub trait HttpForwarder {
@@ -81,16 +90,7 @@ pub trait HttpForwarder {
     where
         B: AsyncRead + Unpin + Send + 'static;
 }
-#[cfg(feature = "tcp_forward")]
-#[async_trait::async_trait]
-pub trait TcpForwarder {
-    async fn tcp_forward(
-        &self,
-        _: CancellationToken,
-        _: TcpForwardParams,
-        _: TcpStream,
-    ) -> Result<(), CrabError>;
-}
+
 /// 处理远程节点发送的命令
 #[async_trait::async_trait]
 pub trait CommandHandler: Send {
@@ -121,8 +121,10 @@ impl CommandHandler for Command {
             Command::Delete(delete) => Some(Box::new(delete)),
             Command::ReadFile(read) => Some(Box::new(read)),
             Command::WriteFile(write) => Some(Box::new(write)),
+            Command::Dir(path) => Some(Box::new(DirCommand { path })),
             Command::HttpProxy(req) => Some(Box::new(req)),
-            Command::TCPForward(req) => Some(Box::new(TCPForwarder::new(req))),
+            Command::TcpForward(req) => Some(Box::new(TcpForwardHandler::new(req))),
+            Command::UdpForward(req) => Some(Box::new(UdpForwardHandler::new(req))),
         };
         if let Some(handler) = handler {
             handler
@@ -164,6 +166,9 @@ where
         h: MessageHeader,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
+        stream
+            .write_message(h.method, h.option, &AckMessage::success())
+            .await?;
         let this = *self;
         match this.make_response(c.clone(), provider.clone()).await {
             Ok(resp) => stream.write_message(h.method, h.option, &resp).await,

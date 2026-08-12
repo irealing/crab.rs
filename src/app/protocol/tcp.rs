@@ -28,10 +28,10 @@ impl From<&TcpForwardParams> for TcpKeepalive {
             .with_retries(value.keepalive_retries as u32)
     }
 }
-pub struct TCPForwarder {
+pub struct TcpForwardHandler {
     req: TcpForwardParams,
 }
-impl TCPForwarder {
+impl TcpForwardHandler {
     pub fn new(req: TcpForwardParams) -> Self {
         Self { req }
     }
@@ -48,8 +48,19 @@ impl TCPForwarder {
         Ok(socket)
     }
 }
+#[cfg(feature = "tcp_forward")]
 #[async_trait::async_trait]
-impl CommandHandler for TCPForwarder {
+pub trait TcpForwarder {
+    async fn tcp_forward(
+        &self,
+        _: CancellationToken,
+        _: TcpForwardParams,
+        _: TcpStream,
+    ) -> Result<(), CrabError>;
+}
+
+#[async_trait::async_trait]
+impl CommandHandler for TcpForwardHandler {
     async fn handle(
         self: Box<Self>,
         cancel: CancellationToken,

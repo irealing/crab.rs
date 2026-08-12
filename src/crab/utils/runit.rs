@@ -1,12 +1,50 @@
 use super::super::errors::CrabError;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 #[async_trait::async_trait]
 pub trait Worker: Send + Sync {
     async fn serve(&self, token: CancellationToken) -> Result<(), CrabError>;
 }
-
+#[async_trait::async_trait]
+pub trait OnceWorker: Send {
+    async fn serve(self, token: CancellationToken) -> Result<(), CrabError>;
+}
+pub struct OnceRunnerWorker<T> {
+    inner: Mutex<Option<T>>,
+}
+#[async_trait::async_trait]
+impl<T> Worker for OnceRunnerWorker<T>
+where
+    T: OnceWorker,
+{
+    async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
+        let mut guard = self.inner.lock().await;
+        let Some(worker) = guard.take() else {
+            return Err(CrabError::ErrorCode(CrabError::ALREADY_SERVED));
+        };
+        drop(guard);
+        worker.serve(token).await
+    }
+}
+impl<T: OnceWorker> From<T> for OnceRunnerWorker<T> {
+    fn from(inner: T) -> Self {
+        Self {
+            inner: Mutex::new(Some(inner)),
+        }
+    }
+}
+#[async_trait::async_trait]
+impl<F, Fut> OnceWorker for F
+where
+    F: FnOnce(CancellationToken) -> Fut + Send,
+    Fut: Future<Output = Result<(), CrabError>> + Send + 'static,
+{
+    async fn serve(self, token: CancellationToken) -> Result<(), CrabError> {
+        self(token).await
+    }
+}
 #[async_trait::async_trait]
 impl Worker for Vec<Arc<dyn Worker>> {
     async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
