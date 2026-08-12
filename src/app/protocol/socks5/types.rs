@@ -7,6 +7,7 @@ pub struct PasswordAuthConfig {
     pub password: String,
 }
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
 pub enum AuthConfig {
     NoAuth,
     Password(PasswordAuthConfig),
