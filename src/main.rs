@@ -1,12 +1,14 @@
 mod app;
 use std::{process::ExitCode, sync::Arc};
 
+use crate::app::protocol::Socks5Server;
 #[cfg(feature = "tcp_forward")]
 use crate::app::workers::forwarder::TcpForwarderWorker;
 use app::ServiceProvider;
 #[cfg(feature = "api")]
 use app::workers::{BaseApiWorker, CtrlWorker};
 use app::{config, protocol};
+use crab::utils::runit::OnceRunnerWorker;
 use crab::{
     CrabError, create_local_endpoint,
     utils::runit::{WaitExitWorker, Worker},
@@ -48,6 +50,17 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
         if let Some(options) = cfg.tcp_forward {
             for opt in options {
                 worker.push(Arc::new(TcpForwarderWorker::new(opt, provider.clone())));
+            }
+        }
+    }
+    #[cfg(feature = "socks5")]
+    {
+        if let Some(options) = cfg.socks5_proxy {
+            for opt in options {
+                worker.push(Arc::new(OnceRunnerWorker::new(Socks5Server::new(
+                    opt,
+                    provider.clone(),
+                ))));
             }
         }
     }

@@ -1,6 +1,7 @@
 use super::super::errors::CrabError;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 #[async_trait::async_trait]
@@ -13,6 +14,16 @@ pub trait OnceWorker: Send {
 }
 pub struct OnceRunnerWorker<T> {
     inner: Mutex<Option<T>>,
+}
+impl<T> OnceRunnerWorker<T>
+where
+    T: OnceWorker,
+{
+    pub fn new(inner: T) -> Self {
+        Self {
+            inner: Mutex::new(Some(inner)),
+        }
+    }
 }
 #[async_trait::async_trait]
 impl<T> Worker for OnceRunnerWorker<T>
@@ -35,6 +46,51 @@ impl<T: OnceWorker> From<T> for OnceRunnerWorker<T> {
         }
     }
 }
+#[async_trait::async_trait]
+impl<T> OnceWorker for Receiver<T>
+where
+    T: OnceWorker + 'static,
+{
+    async fn serve(mut self, token: CancellationToken) -> Result<(), CrabError> {
+        let mut join_set: JoinSet<Result<(), CrabError>> = JoinSet::new();
+        loop {
+            tokio::select! {
+                _=token.cancelled() => break,
+                worker_ret=self.recv() =>{
+                    let Some(worker) = worker_ret else{
+                        break
+                    };
+                    join_set.spawn(worker.serve(token.clone()));
+                }
+                Some(join_ret)=join_set.join_next(),if !join_set.is_empty() => {
+                    match join_ret{
+                        Ok(Err(err)) => {
+                        log::warn!("worker exited with error: {:?}", err);
+                    }
+                    Err(err) => {
+                        log::error!("worker join  error: {:?}", err);
+                    }
+                    _ => {}
+                    }
+                }
+            }
+        }
+        drop(self);
+        while let Some(join_ret) = join_set.join_next().await {
+            match join_ret {
+                Ok(Err(err)) => {
+                    log::warn!("worker exited with error: {:?}", err);
+                }
+                Err(err) => {
+                    log::error!("worker join  error: {:?}", err);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
 #[async_trait::async_trait]
 impl<F, Fut> OnceWorker for F
 where

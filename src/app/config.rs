@@ -1,10 +1,11 @@
 use std::{fs, str::FromStr};
 
-use serde::Deserialize;
 #[cfg(feature = "tcp_forward")]
 use super::workers::forwarder::TcpForwarderOption;
+#[cfg(feature = "socks5")]
+use crate::protocol::Config as SocksConfig;
 use crab::{CrabError, EndpointConfig, utils::crypto::Config as TLSConfig};
-
+use serde::Deserialize;
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub node_id: String,
@@ -12,6 +13,8 @@ pub struct Config {
     pub tls: TLSConfig,
     #[cfg(feature = "tcp_forward")]
     pub tcp_forward: Option<Vec<TcpForwarderOption>>,
+    #[cfg(feature = "socks5")]
+    pub socks5_proxy: Option<Vec<SocksConfig>>,
 }
 impl FromStr for Config {
     type Err = CrabError;
