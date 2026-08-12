@@ -114,11 +114,12 @@ impl OnceWorker for Socks5Server {
                 self.start(Server::new(listener, Arc::new(NoAuth)), token)
                     .await
             }
-            AuthConfig::Password(ref auth) => {
-                let password = Password::new(
-                    auth.username.clone().into_bytes(),
-                    auth.password.clone().into_bytes(),
-                );
+            AuthConfig::Password {
+                ref username,
+                ref password,
+            } => {
+                let password =
+                    Password::new(username.clone().into_bytes(), password.clone().into_bytes());
                 self.start(Server::new(listener, Arc::new(password)), token)
                     .await
             }

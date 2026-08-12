@@ -23,4 +23,4 @@ pub use tcp::TcpForwardParams;
 pub use udp::{SessionOption, UdpForwarder, UdpForwarderHandle, UdpPacketWriter};
 
 #[cfg(feature = "socks5")]
-pub use socks5::{AuthConfig, Config, PasswordAuthConfig, Socks5Server};
+pub use socks5::{AuthConfig, Config, Socks5Server};
