@@ -1,6 +1,5 @@
 mod app;
-use std::{process::ExitCode, sync::Arc};
-
+#[cfg(feature = "socks5")]
 use crate::app::protocol::Socks5Server;
 #[cfg(feature = "tcp_forward")]
 use crate::app::workers::forwarder::TcpForwarderWorker;
@@ -13,6 +12,7 @@ use crab::{
     CrabError, create_local_endpoint,
     utils::runit::{WaitExitWorker, Worker},
 };
+use std::{process::ExitCode, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
 const DEFAULT_CONFIG_FILE: &str = "@config.toml";

@@ -35,7 +35,7 @@ impl TcpForwardHandler {
     pub fn new(req: TcpForwardParams) -> Self {
         Self { req }
     }
-    async fn connect(&self) -> Result<TcpStream, CrabError> {
+    async fn connect(&self) -> Result<(TcpStream, SocketAddr), CrabError> {
         let socket = timeout(
             Duration::from_secs(self.req.connect_timeout as u64),
             TcpStream::connect(self.req.target_address),
@@ -45,10 +45,12 @@ impl TcpForwardHandler {
         let keepalive = TcpKeepalive::from(&self.req);
         let socket_ref = SockRef::from(&socket);
         socket_ref.set_tcp_keepalive(&keepalive)?;
-        Ok(socket)
+        let local_addr = socket.local_addr()?;
+        Ok((socket, local_addr))
     }
 }
-#[cfg(feature = "tcp_forward")]
+
+#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
 #[async_trait::async_trait]
 pub trait TcpForwarder {
     async fn tcp_forward(
@@ -69,9 +71,12 @@ impl CommandHandler for TcpForwardHandler {
         mut stream: Stream,
     ) -> Result<(), CrabError> {
         let sock = match self.connect().await {
-            Ok(sock) => {
+            Ok((sock, addr)) => {
                 stream
                     .write_message(header.method, header.option, &AckMessage::success())
+                    .await?;
+                stream
+                    .write_message(header.method, header.option, &addr)
                     .await?;
                 sock
             }

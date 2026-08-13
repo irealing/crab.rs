@@ -1,5 +1,8 @@
 use crab::utils::runit::OnceWorker;
 use crab::{CrabError, Handle};
+use socks5_server::connection::connect::state::NeedReply;
+use socks5_server::proto::Address;
+use socks5_server::Connect;
 use tokio_util::sync::CancellationToken;
 
 pub enum Session {
@@ -16,7 +19,9 @@ impl OnceWorker for Session {
     }
 }
 pub struct TcpSession {
-    handle: Handle,
+    pub handle: Handle,
+    pub conn: Connect<NeedReply>,
+    pub address: Address,
 }
 #[async_trait::async_trait]
 impl OnceWorker for TcpSession {

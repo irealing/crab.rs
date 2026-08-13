@@ -1,3 +1,4 @@
+use super::session::{Session, TcpSession};
 use super::types::{AuthConfig, Config};
 use crate::app::ServiceProvider;
 use crab::utils::runit::OnceWorker;
@@ -26,7 +27,9 @@ impl Socks5Server {
         T: 'static,
     {
         let (tx, rx) = mpsc::channel::<Handshake<T>>(10);
+        let (sess_tx, sess_rx) = mpsc::channel(10);
         let handle = tokio::spawn(rx.serve(cancel.clone()));
+        let sess_handle = tokio::spawn(sess_rx.serve(cancel.clone()));
         loop {
             tokio::select! {
                 _=cancel.cancelled()=>break,
@@ -37,12 +40,12 @@ impl Socks5Server {
                             break;
                         }
                         Ok((stream, addr)) => {
-                            log::info!("Socks5Server Accept ok result {:?}", addr);
+                            log::info!("Accept socks5 client ok result {:?}", addr);
                             let Some((handle,_))=self.provider.manager().get(&self.config.target)else{
                                 log::warn!("Socks5Server Accept error target node {} not exists",&self.config.target);
                                 continue;
                             };
-                            if let Err(_)=tx.send(Handshake{handle,stream,}).await{
+                            if let Err(_)=tx.send(Handshake{handle,stream,sender:sess_tx.clone()}).await{
                                 log::error!("Socks5Server send handshake task error");
                             }
                         }
@@ -50,12 +53,14 @@ impl Socks5Server {
                 }
             }
         }
-        handle.await?
+        let _ = tokio::try_join!(handle, sess_handle)?;
+        Ok(())
     }
 }
 struct Handshake<T> {
     handle: Handle,
     stream: IncomingConnection<T, NeedAuthenticate>,
+    sender: mpsc::Sender<Session>,
 }
 #[async_trait::async_trait]
 impl<T> OnceWorker for Handshake<T> {
@@ -90,10 +95,17 @@ impl<T> OnceWorker for Handshake<T> {
                     .await;
                 Ok(())
             }
-            Command::Connect(conn, _) => {
-                let _ = conn
-                    .reply(Reply::CommandNotSupported, Address::unspecified())
-                    .await;
+            Command::Connect(conn, address) => {
+                let sess = Session::Tcp(TcpSession {
+                    handle: self.handle,
+                    conn,
+                    address,
+                });
+                let _ = self
+                    .sender
+                    .send(sess)
+                    .await
+                    .inspect_err(|_| log::error!("Socks5Server Session worker closed"));
                 Ok(())
             }
             Command::Bind(bind, _) => {

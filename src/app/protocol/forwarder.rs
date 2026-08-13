@@ -1,15 +1,16 @@
-#[cfg(feature = "tcp_forward")]
-use super::tcp::tcp_forward;
-#[cfg(feature = "tcp_forward")]
+#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
 use super::tcp::TcpForwarder;
+#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
+use super::tcp::tcp_forward;
 use super::types::{Command, HttpForwarder};
-#[cfg(feature = "tcp_forward")]
+#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
 use crate::app::protocol::TcpForwardParams;
 use crate::app::utils::http::{HttpRequest, HttpResponse};
 use crab::proto::{MessageReader, Stream};
 use crab::{CrabError, Handle};
+use std::net::SocketAddr;
 use tokio::io::{AsyncRead, DuplexStream, duplex};
-#[cfg(feature = "tcp_forward")]
+#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -93,7 +94,7 @@ impl HttpForwarder for Handle {
         }
     }
 }
-#[cfg(feature = "tcp_forward")]
+#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
 #[async_trait::async_trait]
 impl TcpForwarder for Handle {
     async fn tcp_forward(
@@ -104,7 +105,9 @@ impl TcpForwarder for Handle {
     ) -> Result<(), CrabError> {
         self.exec(
             Command::TcpForward(param),
-            async move |cancel: CancellationToken, stream: Stream| -> Result<(), CrabError> {
+            async move |cancel: CancellationToken, mut stream: Stream| -> Result<(), CrabError> {
+                let (_, addr) = stream.read_message::<SocketAddr>().await?;
+                log::info!("tcp forward request via: {}", addr);
                 tcp_forward(cancel, stream, conn).await
             },
         )

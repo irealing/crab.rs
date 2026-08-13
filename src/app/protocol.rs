@@ -11,13 +11,13 @@ mod types;
 mod udp;
 mod util;
 
-#[cfg(feature = "tcp_forward")]
+#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
 pub use tcp::TcpForwarder;
 pub use types::{CommandExecutor, HttpForwarder};
 
 pub use commands::{DirEntry, FileMetadata, WriteFile};
 pub use proto::AppProtocol;
-#[cfg(feature = "tcp_forward")]
+#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
 pub use tcp::TcpForwardParams;
 #[cfg(feature = "udp_forward")]
 pub use udp::{SessionOption, UdpForwarder, UdpForwarderHandle, UdpPacketWriter};
