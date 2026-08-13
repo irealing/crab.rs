@@ -6,3 +6,4 @@ mod types;
 pub mod udp;
 #[cfg(feature = "tcp_forward")]
 pub use tcp_worker::{TcpForwardOption, TcpForwarderWorker};
+pub use types::Address;

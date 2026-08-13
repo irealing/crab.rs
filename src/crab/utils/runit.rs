@@ -130,17 +130,26 @@ impl Worker for Vec<Arc<dyn Worker>> {
         first_err.map_or(Ok(()), Err)
     }
 }
-pub struct WaitExitWorker {
-    worker: Box<dyn Worker>,
+pub struct WaitExitWorker<T>
+where
+    T: Worker,
+{
+    worker: T,
 }
-impl WaitExitWorker {
-    pub fn new(worker: Box<dyn Worker>) -> Self {
+impl<T> WaitExitWorker<T>
+where
+    T: Worker,
+{
+    pub fn new(worker: T) -> Self {
         Self { worker }
     }
 }
 #[async_trait::async_trait]
-impl Worker for WaitExitWorker {
-    async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
+impl<T> OnceWorker for WaitExitWorker<T>
+where
+    T: Worker,
+{
+    async fn serve(self, token: CancellationToken) -> Result<(), CrabError> {
         let cancel_all = token.clone();
         let _ = tokio::spawn(async move { wait_exit(cancel_all).await });
         self.worker.serve(token).await

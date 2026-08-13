@@ -7,7 +7,7 @@ use app::protocol::socks5::Socks5Server;
 #[cfg(feature = "api")]
 use app::workers::{BaseApiWorker, CtrlWorker};
 use app::{config, protocol};
-use crab::utils::runit::OnceRunnerWorker;
+use crab::utils::runit::{OnceRunnerWorker, OnceWorker};
 use crab::{
     CrabError, create_local_endpoint,
     utils::runit::{WaitExitWorker, Worker},
@@ -70,7 +70,7 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
     let proto = protocol::AppProtocol::new(provider.clone());
     let local_node = create_local_endpoint(provider.tls_provider(), cfg.endpoint, proto)?;
     worker.push(Arc::new(local_node));
-    WaitExitWorker::new(Box::new(worker))
+    WaitExitWorker::new(worker)
         .serve(CancellationToken::new())
         .await
 }

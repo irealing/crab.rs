@@ -1,6 +1,6 @@
 use super::types::Address;
-use crate::app::protocol::types::{Command, CommandHandler};
 use crate::app::ServiceProvider;
+use crate::app::protocol::types::{Command, CommandHandler};
 use crab::proto::{AckMessage, MessageHeader, Stream};
 use crab::{CrabError, Handle};
 use serde::{Deserialize, Serialize};

@@ -2,7 +2,7 @@ use super::tcp::TcpForwardParams;
 use super::tcp::TcpForwarder;
 use crate::app::Manager;
 use crab::CrabError;
-use crab::utils::runit::{OnceRunnerWorker, OnceWorker, serve_all_workers};
+use crab::utils::runit::OnceWorker;
 use serde::{Deserialize, Serialize};
 use socket2::{SockRef, TcpKeepalive};
 use std::net::SocketAddr;
@@ -34,9 +34,7 @@ impl OnceWorker for TcpForwarderWorker {
         let listener = TcpListener::bind(self.options.listen).await?;
         let keepalive = TcpKeepalive::from(&self.options.params);
         let (tx, rx) = mpsc::channel(10);
-        let workers_cancel = token.clone();
-        let workers_handle =
-            tokio::spawn(async move { serve_all_workers(workers_cancel, rx).await });
+        let workers_handle = tokio::spawn(rx.serve(token.clone()));
         loop {
             tokio::select! {
                 _=token.cancelled() => {
@@ -58,10 +56,11 @@ impl OnceWorker for TcpForwarderWorker {
                                 continue;
                             }
                             let params=self.options.params.clone();
-                            let worker=OnceRunnerWorker::from(
+                            let worker=
                                 async move |cancel:CancellationToken| {
-                                handle.tcp_forward(cancel,params,stream).await
-                            });
+                                handle.tcp_forward(cancel,params,stream).await?;
+                                    Ok(())
+                            };
                             if tx.send(worker).await.is_err(){
                                 break;
                             }
