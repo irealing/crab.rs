@@ -1,9 +1,9 @@
 mod app;
-#[cfg(feature = "socks5")]
-use crate::app::protocol::Socks5Server;
-#[cfg(feature = "tcp_forward")]
-use crate::app::workers::forwarder::TcpForwarderWorker;
 use app::ServiceProvider;
+#[cfg(feature = "tcp_forward")]
+use app::protocol::forwarder::TcpForwarderWorker;
+#[cfg(feature = "socks5")]
+use app::protocol::socks5::Socks5Server;
 #[cfg(feature = "api")]
 use app::workers::{BaseApiWorker, CtrlWorker};
 use app::{config, protocol};
@@ -49,7 +49,10 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
     {
         if let Some(options) = cfg.tcp_forward {
             for opt in options {
-                worker.push(Arc::new(TcpForwarderWorker::new(opt, provider.clone())));
+                worker.push(Arc::new(OnceRunnerWorker::new(TcpForwarderWorker::new(
+                    opt,
+                    provider.manager(),
+                ))));
             }
         }
     }

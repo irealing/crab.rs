@@ -43,7 +43,7 @@ impl CommandExecutor for Handle {
     async fn read_dir(&self, path: String) -> Result<Vec<DirEntry>, CrabError> {
         let (_, ret) = self
             .exec(
-                Command::Dir(path),
+                Command::ListDir(path),
                 async |_: CancellationToken, mut stream: Stream| {
                     stream.read_message::<DirEntryList>().await
                 },

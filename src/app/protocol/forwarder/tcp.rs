@@ -1,7 +1,8 @@
-use super::super::ServiceProvider;
-use super::types::CommandHandler;
-use crab::CrabError;
+use super::types::Address;
+use crate::app::protocol::types::{Command, CommandHandler};
+use crate::app::ServiceProvider;
 use crab::proto::{AckMessage, MessageHeader, Stream};
+use crab::{CrabError, Handle};
 use serde::{Deserialize, Serialize};
 use socket2::{SockRef, TcpKeepalive};
 use std::net::SocketAddr;
@@ -10,10 +11,10 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TcpForwardParams {
     /// 目标连接地址
-    pub target_address: SocketAddr,
+    pub target_address: Address,
     /// TCP连接超时时间
     pub connect_timeout: u8,
     pub keepalive_timeout: u8,
@@ -38,7 +39,7 @@ impl TcpForwardHandler {
     async fn connect(&self) -> Result<(TcpStream, SocketAddr), CrabError> {
         let socket = timeout(
             Duration::from_secs(self.req.connect_timeout as u64),
-            TcpStream::connect(self.req.target_address),
+            TcpStream::connect(self.req.target_address.resolve().await?),
         )
         .await
         .map_err(|_| CrabError::ErrorCode(CrabError::TIMEOUT_ERROR))??;
@@ -59,6 +60,26 @@ pub trait TcpForwarder {
         _: TcpForwardParams,
         _: TcpStream,
     ) -> Result<(), CrabError>;
+}
+#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
+#[async_trait::async_trait]
+impl TcpForwarder for Handle {
+    async fn tcp_forward(
+        &self,
+        _: CancellationToken,
+        param: TcpForwardParams,
+        conn: TcpStream,
+    ) -> Result<(), CrabError> {
+        self.exec(
+            Command::TcpForward(param),
+            async move |cancel: CancellationToken, mut stream: Stream| -> Result<(), CrabError> {
+                let (_, addr) = stream.read_message::<SocketAddr>().await?;
+                log::info!("tcp forward request via: {}", addr);
+                tcp_forward(cancel, stream, conn).await
+            },
+        )
+        .await
+    }
 }
 
 #[async_trait::async_trait]

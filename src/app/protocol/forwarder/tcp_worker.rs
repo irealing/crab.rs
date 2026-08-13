@@ -1,16 +1,17 @@
-use crate::app::ServiceProvider;
-use crate::app::protocol::TcpForwardParams;
-use crate::app::protocol::TcpForwarder;
+use super::tcp::TcpForwardParams;
+use super::tcp::TcpForwarder;
+use crate::app::Manager;
 use crab::CrabError;
-use crab::utils::runit::{OnceRunnerWorker, Worker, serve_all_workers};
+use crab::utils::runit::{OnceRunnerWorker, OnceWorker, serve_all_workers};
 use serde::{Deserialize, Serialize};
 use socket2::{SockRef, TcpKeepalive};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
 #[derive(Serialize, Deserialize, Debug)]
-pub struct TcpForwarderOption {
+pub struct TcpForwardOption {
     /// 本地监听地址
     pub listen: SocketAddr,
     /// 目标代理节点
@@ -19,17 +20,17 @@ pub struct TcpForwarderOption {
     pub params: TcpForwardParams,
 }
 pub struct TcpForwarderWorker {
-    options: TcpForwarderOption,
-    provider: ServiceProvider,
+    options: TcpForwardOption,
+    manager: Manager,
 }
 impl TcpForwarderWorker {
-    pub fn new(options: TcpForwarderOption, provider: ServiceProvider) -> Self {
-        Self { options, provider }
+    pub fn new(options: TcpForwardOption, manager: Manager) -> Self {
+        Self { options, manager }
     }
 }
 #[async_trait::async_trait]
-impl Worker for TcpForwarderWorker {
-    async fn serve(&self, token: CancellationToken) -> Result<(), CrabError> {
+impl OnceWorker for TcpForwarderWorker {
+    async fn serve(self, token: CancellationToken) -> Result<(), CrabError> {
         let listener = TcpListener::bind(self.options.listen).await?;
         let keepalive = TcpKeepalive::from(&self.options.params);
         let (tx, rx) = mpsc::channel(10);
@@ -47,7 +48,7 @@ impl Worker for TcpForwarderWorker {
                             log::warn!("tcp-forwarder accept error: {}", err);
                         }
                         Ok((stream, _)) => {
-                            let Some((handle,_))= self.provider.manager().get(&self.options.target)else{
+                            let Some((handle,_))= self.manager.get(&self.options.target)else{
                                 drop(stream);
                                 continue
                             };
@@ -56,7 +57,7 @@ impl Worker for TcpForwarderWorker {
                                 log::warn!("tcp-forwarder set_tcp_keepalive error: {}", err);
                                 continue;
                             }
-                            let params=self.options.params;
+                            let params=self.options.params.clone();
                             let worker=OnceRunnerWorker::from(
                                 async move |cancel:CancellationToken| {
                                 handle.tcp_forward(cancel,params,stream).await

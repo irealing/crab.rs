@@ -1,9 +1,9 @@
-use super::super::super::Manager;
-use super::super::super::protocol::{CommandExecutor, WriteFile};
 use super::super::workers::ApiWorker;
 use super::types::Ret;
 use super::types::{ProxyResponse, StreamResponse};
+use crate::app::Manager;
 use crate::app::ServiceProvider;
+use crate::app::protocol::{CommandExecutor, WriteFile};
 use crate::app::protocol::{DirEntry, HttpForwarder};
 use crate::app::types::Handshake;
 use crate::app::utils::http::HttpRequest;
