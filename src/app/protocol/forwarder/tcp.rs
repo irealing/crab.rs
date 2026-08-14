@@ -65,6 +65,7 @@ impl CommandHandler for TcpForwardHandler {
             .await?;
         let sock = match self.connect().await {
             Ok((sock, addr)) => {
+                log::debug!("tcp forward via {}", addr);
                 stream
                     .write_message(header.method, header.option, &addr)
                     .await?;
@@ -76,6 +77,8 @@ impl CommandHandler for TcpForwardHandler {
                 return Err(e);
             }
         };
-        tcp_forward(cancel, stream, sock).await
+        tcp_forward(cancel, stream, sock)
+            .await
+            .inspect_err(|e| log::error!("tcp forward error: {}", e))
     }
 }

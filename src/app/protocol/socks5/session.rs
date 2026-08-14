@@ -9,7 +9,9 @@ use socks5_server::Connect;
 use socks5_server::connection::connect::state::NeedReply;
 use socks5_server::proto::{Address as Socks5Addr, Reply};
 use std::net::SocketAddr;
+use std::string::FromUtf8Error;
 use tokio_util::sync::CancellationToken;
+use windows_sys::Win32::Security::Credentials;
 
 pub enum Session {
     Tcp(TcpSession),
@@ -35,22 +37,34 @@ impl TcpSession {
     pub const DEFAULT_KEEPALIVE_RETRY: u8 = 15;
     pub const DEFAULT_KEEPALIVE_RETRY_INTERVAL: u8 = 3;
 }
+impl TryFrom<Socks5Addr> for Address {
+    type Error = CrabError;
+    fn try_from(addr: Socks5Addr) -> Result<Self, Self::Error> {
+        match addr {
+            Socks5Addr::SocketAddress(address) => Ok(Address::SocketAddress(address)),
+            Socks5Addr::DomainAddress(host, port) => match String::from_utf8(host) {
+                Ok(host) => Ok(Address::DomainAddress { host, port }),
+                Err(err) => {
+                    log::error!("invalid UTF-8 address: {}", err);
+                    Err(CrabError::ErrorCode(CrabError::BAD_PARAMETER))
+                }
+            },
+        }
+    }
+}
 #[async_trait::async_trait]
 impl OnceWorker for TcpSession {
     async fn serve(self, token: CancellationToken) -> Result<(), CrabError> {
-        let target_address = match self.address {
-            Socks5Addr::SocketAddress(address) => Address::SocketAddress(address),
-            Socks5Addr::DomainAddress(host, port) => match String::from_utf8(host) {
-                Ok(host) => Address::DomainAddress { host, port },
-                Err(err) => {
-                    log::error!("bad host format {}", err);
-                    let _ = self
-                        .conn
-                        .reply(Reply::AddressTypeNotSupported, Socks5Addr::unspecified())
-                        .await;
-                    return Err(CrabError::ErrorCode(CrabError::BAD_PARAMETER));
-                }
-            },
+        let target_address = match self.address.try_into() {
+            Ok(address) => address,
+            Err(err) => {
+                log::error!("invalid address type: {}", err);
+                let _ = self
+                    .conn
+                    .reply(Reply::AddressTypeNotSupported, Socks5Addr::unspecified())
+                    .await;
+                return Err(err);
+            }
         };
         let param = TcpForwardParams {
             target_address,
@@ -64,6 +78,7 @@ impl OnceWorker for TcpSession {
             .exec_ack::<_, SocketAddr, _>(Command::TcpForward(param))
             .await
             .inspect_err(|err| log::warn!("socks5 proxy forward tcp error {}", err))?;
+        log::debug!("tcp forward via addr: {}", addr);
         let reply_ret = self
             .conn
             .reply(Reply::Succeeded, Socks5Addr::SocketAddress(addr))
