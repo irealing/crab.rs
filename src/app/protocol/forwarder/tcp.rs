@@ -46,6 +46,7 @@ impl TcpForwardHandler {
         let keepalive = TcpKeepalive::from(&self.req);
         let socket_ref = SockRef::from(&socket);
         socket_ref.set_tcp_keepalive(&keepalive)?;
+        socket.set_nodelay(true)?;
         let local_addr = socket.local_addr()?;
         Ok((socket, local_addr))
     }
@@ -65,6 +66,7 @@ impl CommandHandler for TcpForwardHandler {
             .await?;
         let sock = match self.connect().await {
             Ok((sock, addr)) => {
+                log::debug!("tcp forward via {}", addr);
                 stream
                     .write_message(header.method, header.option, &addr)
                     .await?;
@@ -76,6 +78,9 @@ impl CommandHandler for TcpForwardHandler {
                 return Err(e);
             }
         };
-        tcp_forward(cancel, stream, sock).await
+        stream.read_ack().await?;
+        tcp_forward(cancel, stream, sock)
+            .await
+            .inspect_err(|e| log::error!("tcp forward error: {}", e))
     }
 }
