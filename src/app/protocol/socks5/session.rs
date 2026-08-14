@@ -1,10 +1,14 @@
-use crate::app::protocol::TcpForwardParams;
+use crate::app::protocol::forwarder::tcp::tcp_forward;
 use crate::app::protocol::forwarder::Address;
+use crate::app::protocol::types::Command;
+use crate::app::protocol::TcpForwardParams;
+use crab::proto::Stream;
 use crab::utils::runit::OnceWorker;
 use crab::{CrabError, Handle};
-use socks5_server::Connect;
 use socks5_server::connection::connect::state::NeedReply;
 use socks5_server::proto::{Address as Socks5Addr, Reply};
+use socks5_server::Connect;
+use std::net::SocketAddr;
 use tokio_util::sync::CancellationToken;
 
 pub enum Session {
@@ -55,9 +59,30 @@ impl OnceWorker for TcpSession {
             keepalive_interval: Self::DEFAULT_KEEPALIVE_RETRY_INTERVAL,
             keepalive_retries: Self::DEFAULT_KEEPALIVE_RETRY,
         };
-
-        // self.handle.tcp_forward(token,param,)
-        todo!()
+        let (handle, addr) = self
+            .handle
+            .exec_ack::<_, SocketAddr, _>(Command::TcpForward(param))
+            .await
+            .inspect_err(|err| log::warn!("socks5 proxy forward tcp error {}", err))?;
+        let reply_ret = self
+            .conn
+            .reply(Reply::Succeeded, Socks5Addr::SocketAddress(addr))
+            .await
+            .map_err(|err| {
+                log::error!("socks5 proxy forward tcp reply error {}", err.0);
+                CrabError::ErrorCodeWithMessage(
+                    CrabError::BAD_STATUS_ERROR,
+                    format!("socks5 proxy forward tcp reply error {}", err.0),
+                )
+            })?;
+        let executor = async move |cancel: CancellationToken, stream: Stream| {
+            let conn = reply_ret.into_inner();
+            tcp_forward(cancel, stream, conn).await
+        };
+        handle
+            .send(Ok(executor))
+            .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?;
+        Ok(())
     }
 }
 pub struct UdpSession {}

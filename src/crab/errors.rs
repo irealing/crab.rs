@@ -17,7 +17,7 @@ pub enum CrabError {
 
 impl CrabError {
     pub const NO_ERROR: u32 = 0;
-    pub const ASYNC_RUNTIME_ERROR: u32 = 1;
+    pub const BAD_STATUS_ERROR: u32 = 1;
     pub const UNSUPPORTED_ERROR: u32 = 2;
     pub const KEY_NOT_FOUND: u32 = 3;
     pub const CRYPTO_ERROR: u32 = 4;
@@ -59,7 +59,7 @@ impl CrabError {
         match self {
             CrabError::ErrorCode(code) => match *code {
                 Self::NO_ERROR => "No error",
-                Self::ASYNC_RUNTIME_ERROR => "Asynchronous runtime error",
+                Self::BAD_STATUS_ERROR => "Bad status error",
                 Self::UNSUPPORTED_ERROR => "Unsupported error",
                 Self::KEY_NOT_FOUND => "Key not found",
                 Self::CRYPTO_ERROR => "Crypto error",
