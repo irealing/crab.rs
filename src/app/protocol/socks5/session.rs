@@ -9,9 +9,7 @@ use socks5_server::Connect;
 use socks5_server::connection::connect::state::NeedReply;
 use socks5_server::proto::{Address as Socks5Addr, Reply};
 use std::net::SocketAddr;
-use std::string::FromUtf8Error;
 use tokio_util::sync::CancellationToken;
-use windows_sys::Win32::Security::Credentials;
 
 pub enum Session {
     Tcp(TcpSession),
