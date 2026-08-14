@@ -5,7 +5,7 @@ use crab::CrabError;
 use crab::proto::{AckMessage, MessageHeader, MessageReader, MessageWriter, Stream};
 use futures_util::TryStreamExt;
 use http_body::Frame;
-use http_body_util::{BodyExt,StreamBody};
+use http_body_util::{BodyExt, StreamBody};
 use tokio::io::{AsyncRead, AsyncWriteExt, DuplexStream, duplex};
 use tokio::sync::oneshot;
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -128,6 +128,7 @@ where
     let _ = req_fut.await;
     Ok(())
 }
+#[cfg(feature = "api")]
 pub mod worker {
     use crate::app::protocol::forwarder::http::do_http_request_proxy;
     use crate::app::protocol::types::Command;

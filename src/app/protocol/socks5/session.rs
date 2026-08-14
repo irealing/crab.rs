@@ -1,13 +1,13 @@
-use crate::app::protocol::forwarder::tcp::tcp_forward;
+use super::super::forwarder::tcp_forward;
+use crate::app::protocol::TcpForwardParams;
 use crate::app::protocol::forwarder::Address;
 use crate::app::protocol::types::Command;
-use crate::app::protocol::TcpForwardParams;
 use crab::proto::Stream;
 use crab::utils::runit::OnceWorker;
 use crab::{CrabError, Handle};
+use socks5_server::Connect;
 use socks5_server::connection::connect::state::NeedReply;
 use socks5_server::proto::{Address as Socks5Addr, Reply};
-use socks5_server::Connect;
 use std::net::SocketAddr;
 use tokio_util::sync::CancellationToken;
 

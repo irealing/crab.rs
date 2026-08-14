@@ -7,12 +7,11 @@ mod proto;
 pub mod socks5;
 mod types;
 mod util;
-
-pub use types::CommandExecutor;
-
 pub use commands::{DirEntry, FileMetadata, WriteFile};
 #[cfg(any(feature = "tcp_forward", feature = "socks5"))]
 pub use forwarder::tcp::TcpForwardParams;
+#[cfg(any(feature = "api"))]
+pub use types::CommandExecutor;
 
 #[cfg(feature = "udp_forward")]
 pub use forwarder::udp::{SessionOption, UdpForwarder, UdpPacketWriter};
