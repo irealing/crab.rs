@@ -26,7 +26,7 @@ impl CommandExecutor for Handle {
     where
         E: Executor<Output = ()>,
     {
-        self.exec_with_ack::<Command, FileMetadata, E>(Command::ReadFile(ReadFile {
+        self.exec_ack::<Command, FileMetadata, E>(Command::ReadFile(ReadFile {
             path: filename,
         }))
         .await
@@ -36,14 +36,14 @@ impl CommandExecutor for Handle {
         E: Executor<Output = ()>,
     {
         let (sender, _) = self
-            .exec_with_ack::<Command, AckMessage, E>(Command::WriteFile(cmd))
+            .exec_ack::<Command, AckMessage, E>(Command::WriteFile(cmd))
             .await?;
         Ok((sender, ()))
     }
     async fn read_dir(&self, path: String) -> Result<Vec<DirEntry>, CrabError> {
         let (_, ret) = self
             .exec(
-                Command::Dir(path),
+                Command::ListDir(path),
                 async |_: CancellationToken, mut stream: Stream| {
                     stream.read_message::<DirEntryList>().await
                 },

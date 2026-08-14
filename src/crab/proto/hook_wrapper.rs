@@ -188,7 +188,12 @@ where
         cancel: CancellationToken,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
-        let (header, cmd) = stream.read_message::<P::Command>().await?;
+        let (header, cmd) = stream
+            .read_message::<P::Command>()
+            .await
+            .inspect_err(|err| {
+                log::error!("handle stream failed,read command error {:}", err);
+            })?;
         self.protocol
             .handle_command(cancel, meta, (header, cmd), stream)
             .await

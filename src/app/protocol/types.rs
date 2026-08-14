@@ -1,14 +1,13 @@
 use super::super::ServiceProvider;
-use super::super::utils::http::{HttpRequest, HttpResponse};
 use super::commands::{DeleteCommand, DirCommand, DirEntry, FileMetadata, ReadFile, WriteFile};
-use super::tcp::{TcpForwardHandler, TcpForwardParams};
-use super::udp::{UdpForwardHandler, UdpForwardParams};
+use super::forwarder::tcp::{TcpForwardHandler, TcpForwardParams};
+use super::forwarder::udp::{UdpForwardHandler, UdpForwardParams};
+use crate::app::utils::http::HttpRequest;
 use crab::CrabError;
 use crab::proto::{AckMessage, Executor, MessageHeader, Stream, TaskHandle};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-use tokio::io::{AsyncRead, DuplexStream};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Serialize)]
@@ -16,7 +15,7 @@ pub enum Command {
     Ping,
     Delete(DeleteCommand),
     ReadFile(ReadFile),
-    Dir(String),
+    ListDir(String),
     WriteFile(WriteFile),
     HttpProxy(HttpRequest),
     TcpForward(TcpForwardParams),
@@ -41,7 +40,7 @@ impl Display for Command {
                     write.path, write.mkdir, write.overwrite
                 )
             }
-            Command::Dir(ref path) => {
+            Command::ListDir(ref path) => {
                 write!(f, "dir({})", path)
             }
             Command::HttpProxy(ref http_request) => {
@@ -80,16 +79,6 @@ pub trait CommandExecutor {
     /// 列举节点文件目录
     async fn read_dir(&self, _: String) -> Result<Vec<DirEntry>, CrabError>;
 }
-#[async_trait::async_trait]
-pub trait HttpForwarder {
-    /// 发起HTTP代理请求
-    async fn http_proxy<B>(
-        &self,
-        _: (HttpRequest, B),
-    ) -> Result<(HttpResponse, DuplexStream), CrabError>
-    where
-        B: AsyncRead + Unpin + Send + 'static;
-}
 
 /// 处理远程节点发送的命令
 #[async_trait::async_trait]
@@ -121,7 +110,7 @@ impl CommandHandler for Command {
             Command::Delete(delete) => Some(Box::new(delete)),
             Command::ReadFile(read) => Some(Box::new(read)),
             Command::WriteFile(write) => Some(Box::new(write)),
-            Command::Dir(path) => Some(Box::new(DirCommand { path })),
+            Command::ListDir(path) => Some(Box::new(DirCommand { path })),
             Command::HttpProxy(req) => Some(Box::new(req)),
             Command::TcpForward(req) => Some(Box::new(TcpForwardHandler::new(req))),
             Command::UdpForward(req) => Some(Box::new(UdpForwardHandler::new(req))),

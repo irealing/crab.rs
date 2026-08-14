@@ -1,16 +1,18 @@
 mod app;
-use std::{process::ExitCode, sync::Arc};
-
-#[cfg(feature = "tcp_forward")]
-use crate::app::workers::forwarder::TcpForwarderWorker;
 use app::ServiceProvider;
+#[cfg(feature = "tcp_forward")]
+use app::protocol::forwarder::TcpForwarderWorker;
+#[cfg(feature = "socks5")]
+use app::protocol::socks5::Socks5Server;
 #[cfg(feature = "api")]
 use app::workers::{BaseApiWorker, CtrlWorker};
 use app::{config, protocol};
+use crab::utils::runit::{OnceRunnerWorker, OnceWorker};
 use crab::{
     CrabError, create_local_endpoint,
     utils::runit::{WaitExitWorker, Worker},
 };
+use std::{process::ExitCode, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
 const DEFAULT_CONFIG_FILE: &str = "@config.toml";
@@ -47,14 +49,28 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
     {
         if let Some(options) = cfg.tcp_forward {
             for opt in options {
-                worker.push(Arc::new(TcpForwarderWorker::new(opt, provider.clone())));
+                worker.push(Arc::new(OnceRunnerWorker::new(TcpForwarderWorker::new(
+                    opt,
+                    provider.manager(),
+                ))));
+            }
+        }
+    }
+    #[cfg(feature = "socks5")]
+    {
+        if let Some(options) = cfg.socks5_proxy {
+            for opt in options {
+                worker.push(Arc::new(OnceRunnerWorker::new(Socks5Server::new(
+                    opt,
+                    provider.clone(),
+                ))));
             }
         }
     }
     let proto = protocol::AppProtocol::new(provider.clone());
     let local_node = create_local_endpoint(provider.tls_provider(), cfg.endpoint, proto)?;
     worker.push(Arc::new(local_node));
-    WaitExitWorker::new(Box::new(worker))
+    WaitExitWorker::new(worker)
         .serve(CancellationToken::new())
         .await
 }
