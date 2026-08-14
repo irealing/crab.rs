@@ -8,7 +8,7 @@ pub mod socks5;
 mod types;
 mod util;
 pub use commands::{DirEntry, FileMetadata, WriteFile};
-#[cfg(any(feature = "tcp_forward", feature = "socks5"))]
+#[cfg(any(feature = "socks5"))]
 pub use forwarder::tcp::TcpForwardParams;
 #[cfg(any(feature = "api"))]
 pub use types::CommandExecutor;
