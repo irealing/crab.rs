@@ -5,10 +5,12 @@ use crate::app::protocol::types::Command;
 use crab::proto::Stream;
 use crab::utils::runit::OnceWorker;
 use crab::{CrabError, Handle};
+use futures_util::TryFutureExt;
 use socks5_server::Connect;
 use socks5_server::connection::connect::state::NeedReply;
 use socks5_server::proto::{Address as Socks5Addr, Reply};
 use std::net::SocketAddr;
+use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
 pub enum Session {
@@ -89,7 +91,8 @@ impl OnceWorker for TcpSession {
                 )
             })?;
         let executor = async move |cancel: CancellationToken, stream: Stream| {
-            let conn = reply_ret.into_inner();
+            let mut conn = reply_ret.into_inner();
+            conn.flush().await?;
             tcp_forward(cancel, stream, conn).await
         };
         handle
