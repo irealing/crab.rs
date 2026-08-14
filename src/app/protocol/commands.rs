@@ -71,6 +71,9 @@ impl CommandHandler for ReadFile {
         h: MessageHeader,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
+        stream
+            .write_message(h.method, h.option, &AckMessage::success())
+            .await?;
         match fs::metadata(&self.path)
             .await
             .map(|m| m.into())
@@ -151,6 +154,9 @@ impl CommandHandler for WriteFile {
         header: MessageHeader,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
+        stream
+            .write_message(header.method, header.option, &AckMessage::success())
+            .await?;
         let (temp_file_path, mut output) = match self.create_temp_file().await {
             Ok(f) => {
                 stream
