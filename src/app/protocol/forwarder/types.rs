@@ -4,11 +4,8 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 use tokio::net::lookup_host;
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(tag = "type", content = "content")]
 pub enum Address {
-    #[serde(rename = "socket")]
     SocketAddress(SocketAddr),
-    #[serde(rename = "domain")]
     DomainAddress { host: String, port: u16 },
 }
 impl Display for Address {
