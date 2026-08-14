@@ -1,16 +1,17 @@
 use crab::CrabError;
 use crab::proto::Stream;
-use tokio::io::{AsyncWriteExt, copy};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, copy, split};
 use tokio_util::sync::CancellationToken;
-pub async fn tcp_forward(
+pub async fn tcp_forward<C>(
     cancel: CancellationToken,
     stream: Stream,
-    mut conn: TcpStream,
-) -> Result<(), CrabError> {
-    conn.set_nodelay(true)?;
+    conn: C,
+) -> Result<(), CrabError>
+where
+    C: AsyncRead + AsyncWrite + Unpin,
+{
     let (mut quic_writer, mut quic_reader) = stream.split();
-    let (mut tcp_reader, mut tcp_writer) = conn.split();
+    let (mut tcp_reader, mut tcp_writer) = split(conn);
     let forward_fut = async move {
         let s_to_t = async move {
             let ret = copy(&mut quic_reader, &mut tcp_writer).await;

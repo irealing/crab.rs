@@ -8,6 +8,7 @@ use quinn::{Connection, RecvStream, SendStream};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::io::Cursor;
+
 #[async_trait::async_trait]
 pub trait MessageReader {
     async fn read_message<M: DeserializeOwned>(&mut self) -> Result<(MessageHeader, M), CrabError>;

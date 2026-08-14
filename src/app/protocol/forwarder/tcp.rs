@@ -46,6 +46,7 @@ impl TcpForwardHandler {
         let keepalive = TcpKeepalive::from(&self.req);
         let socket_ref = SockRef::from(&socket);
         socket_ref.set_tcp_keepalive(&keepalive)?;
+        socket.set_nodelay(true)?;
         let local_addr = socket.local_addr()?;
         Ok((socket, local_addr))
     }

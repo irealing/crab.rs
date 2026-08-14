@@ -91,9 +91,7 @@ impl OnceWorker for TcpSession {
                 )
             })?;
         let executor = async move |cancel: CancellationToken, stream: Stream| {
-            let mut conn = reply_ret.into_inner();
-            conn.flush().await?;
-            tcp_forward(cancel, stream, conn).await
+            tcp_forward(cancel, stream, reply_ret).await
         };
         handle
             .send(Ok(executor))
