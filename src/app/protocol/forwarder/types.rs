@@ -4,16 +4,18 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 use tokio::net::lookup_host;
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(untagged)]
+#[serde(tag = "type", content = "content")]
 pub enum Address {
+    #[serde(rename = "socket")]
     SocketAddress(SocketAddr),
-    StringAddress { host: String, port: u16 },
+    #[serde(rename = "domain")]
+    DomainAddress { host: String, port: u16 },
 }
 impl Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Address::SocketAddress(addr) => addr.fmt(f),
-            Address::StringAddress { host, port } => write!(f, "host:{},port:{}", host, port),
+            Address::DomainAddress { host, port } => write!(f, "host:{},port:{}", host, port),
         }
     }
 }
@@ -21,7 +23,7 @@ impl Address {
     pub async fn resolve(&self) -> Result<SocketAddr, CrabError> {
         match self {
             Address::SocketAddress(addr) => Ok(*addr),
-            Address::StringAddress { host, port } => {
+            Address::DomainAddress { host, port } => {
                 let mut address = lookup_host((host.as_str(), *port)).await?;
                 match address.next() {
                     Some(addr) => Ok(addr),

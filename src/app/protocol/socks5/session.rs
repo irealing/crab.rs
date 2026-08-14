@@ -37,7 +37,7 @@ impl OnceWorker for TcpSession {
         let target_address = match self.address {
             Socks5Addr::SocketAddress(address) => Address::SocketAddress(address),
             Socks5Addr::DomainAddress(host, port) => match String::from_utf8(host) {
-                Ok(host) => Address::StringAddress { host, port },
+                Ok(host) => Address::DomainAddress { host, port },
                 Err(err) => {
                     log::error!("bad host format {}", err);
                     let _ = self
