@@ -91,11 +91,11 @@ impl CommandHandler for TcpForwardHandler {
         header: MessageHeader,
         mut stream: Stream,
     ) -> Result<(), CrabError> {
+        stream
+            .write_message(header.method, header.option, &AckMessage::success())
+            .await?;
         let sock = match self.connect().await {
             Ok((sock, addr)) => {
-                stream
-                    .write_message(header.method, header.option, &AckMessage::success())
-                    .await?;
                 stream
                     .write_message(header.method, header.option, &addr)
                     .await?;

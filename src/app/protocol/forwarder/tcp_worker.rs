@@ -1,9 +1,8 @@
+use super::tcp::TcpForwardParams;
 use super::tcp::TcpForwarder;
-use super::tcp::{tcp_forward, TcpForwardParams};
 use crate::app::Manager;
-use crab::proto::Stream;
-use crab::utils::runit::OnceWorker;
 use crab::CrabError;
+use crab::utils::runit::OnceWorker;
 use serde::{Deserialize, Serialize};
 use socket2::{SockRef, TcpKeepalive};
 use std::net::SocketAddr;

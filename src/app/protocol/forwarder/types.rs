@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::net::SocketAddr;
 use tokio::net::lookup_host;
-use tokio::sync::oneshot;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum Address {
