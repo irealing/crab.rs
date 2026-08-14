@@ -8,6 +8,7 @@ pub async fn tcp_forward(
     stream: Stream,
     mut conn: TcpStream,
 ) -> Result<(), CrabError> {
+    conn.set_nodelay(true)?;
     let (mut quic_writer, mut quic_reader) = stream.split();
     let (mut tcp_reader, mut tcp_writer) = conn.split();
     let forward_fut = async move {
