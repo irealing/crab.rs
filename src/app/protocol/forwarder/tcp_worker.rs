@@ -1,8 +1,9 @@
-use super::tcp::TcpForwardParams;
 use super::tcp::TcpForwarder;
+use super::tcp::{tcp_forward, TcpForwardParams};
 use crate::app::Manager;
-use crab::CrabError;
+use crab::proto::Stream;
 use crab::utils::runit::OnceWorker;
+use crab::CrabError;
 use serde::{Deserialize, Serialize};
 use socket2::{SockRef, TcpKeepalive};
 use std::net::SocketAddr;
@@ -45,12 +46,12 @@ impl OnceWorker for TcpForwarderWorker {
                         Err(err)=>{
                             log::warn!("tcp-forwarder accept error: {}", err);
                         }
-                        Ok((stream, _)) => {
+                        Ok((conn, _)) => {
                             let Some((handle,_))= self.manager.get(&self.options.target)else{
-                                drop(stream);
+                                drop(conn);
                                 continue
                             };
-                            let socket_ref=SockRef::from(&stream);
+                            let socket_ref=SockRef::from(&conn);
                             if let Err(err)=socket_ref.set_tcp_keepalive(&keepalive){
                                 log::warn!("tcp-forwarder set_tcp_keepalive error: {}", err);
                                 continue;
@@ -58,7 +59,7 @@ impl OnceWorker for TcpForwarderWorker {
                             let params=self.options.params.clone();
                             let worker=
                                 async move |cancel:CancellationToken| {
-                                handle.tcp_forward(cancel,params,stream).await?;
+                                handle.tcp_forward(cancel,params,conn).await?;
                                     Ok(())
                             };
                             if tx.send(worker).await.is_err(){

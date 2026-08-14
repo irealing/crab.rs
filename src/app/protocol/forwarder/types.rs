@@ -32,17 +32,3 @@ impl Address {
         }
     }
 }
-pub struct ForwarderHandle<T> {
-    pub(super) rx: oneshot::Receiver<Result<(), CrabError>>,
-    pub(super) metadata: T,
-}
-impl<T> ForwarderHandle<T> {
-    pub async fn wait(self) -> Result<(), CrabError> {
-        self.rx
-            .await
-            .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?
-    }
-    pub fn metadata(&self) -> &T {
-        &self.metadata
-    }
-}

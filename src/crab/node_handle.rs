@@ -9,6 +9,9 @@ use std::sync::Arc;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot, watch};
 
+pub type ExecAckHandle<E, I, ERR> = (Sender<Result<E, ERR>>, I);
+pub type ExecAckResult<E, I> = Result<ExecAckHandle<E, I, CrabError>, CrabError>;
+
 struct HandleInner {
     meta: Arc<NodeMetadata>,
     status_rx: watch::Receiver<NodeStatus>,
@@ -55,10 +58,7 @@ impl Handle {
         rx.await
             .map_err(|_| CrabError::ErrorCode(CrabError::NODE_ALREADY_EXIT))?
     }
-    pub async fn exec_with_ack<C, I, E>(
-        &self,
-        cmd: C,
-    ) -> Result<(Sender<Result<E, CrabError>>, I), CrabError>
+    pub async fn exec_ack<C, I, E>(&self, cmd: C) -> ExecAckResult<E, I>
     where
         C: Serialize + Sync + Send + 'static,
         I: DeserializeOwned + Send + 'static,
