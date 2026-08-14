@@ -78,6 +78,7 @@ impl CommandHandler for TcpForwardHandler {
                 return Err(e);
             }
         };
+        stream.read_ack().await?;
         tcp_forward(cancel, stream, sock)
             .await
             .inspect_err(|e| log::error!("tcp forward error: {}", e))

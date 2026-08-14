@@ -1,8 +1,8 @@
 use super::tcp::TcpForwardParams;
+use crate::app::Manager;
 use crate::app::protocol::forwarder::tcp_util::tcp_forward;
 use crate::app::protocol::types::Command;
-use crate::app::Manager;
-use crab::proto::Stream;
+use crab::proto::{AckMessage, Method, Stream};
 use crab::utils::runit::OnceWorker;
 use crab::{CrabError, Handle};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,6 @@ use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-
 #[cfg(feature = "tcp_forward")]
 #[async_trait::async_trait]
 pub trait TcpForwarder {
@@ -36,6 +35,9 @@ impl TcpForwarder for Handle {
             async move |cancel: CancellationToken, mut stream: Stream| -> Result<(), CrabError> {
                 let (_, addr) = stream.read_message::<SocketAddr>().await?;
                 log::info!("tcp forward request via: {}", addr);
+                stream
+                    .write_message(Method::Command, 0, &AckMessage::success())
+                    .await?;
                 tcp_forward(cancel, stream, conn).await
             },
         )
