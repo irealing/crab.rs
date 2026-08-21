@@ -17,7 +17,7 @@ pub enum CrabError {
 
 impl CrabError {
     pub const NO_ERROR: u32 = 0;
-    pub const ASYNC_RUNTIME_ERROR: u32 = 1;
+    pub const BAD_STATUS_ERROR: u32 = 1;
     pub const UNSUPPORTED_ERROR: u32 = 2;
     pub const KEY_NOT_FOUND: u32 = 3;
     pub const CRYPTO_ERROR: u32 = 4;
@@ -45,6 +45,8 @@ impl CrabError {
     pub const NO_ENOUGH_SPACE: u32 = 26;
     pub const ALREADY_SERVED: u32 = 27;
     pub const ENCODING_ERROR: u32 = 28;
+    pub const DNS_RESOLVE_ERROR: u32 = 29;
+    pub const NETWORK_ERROR: u32 = 30;
     pub const ILLEGAL_ERROR: u32 = 0xffff_fffe;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
     pub fn err_no(&self) -> u32 {
@@ -58,7 +60,7 @@ impl CrabError {
         match self {
             CrabError::ErrorCode(code) => match *code {
                 Self::NO_ERROR => "No error",
-                Self::ASYNC_RUNTIME_ERROR => "Asynchronous runtime error",
+                Self::BAD_STATUS_ERROR => "Bad status error",
                 Self::UNSUPPORTED_ERROR => "Unsupported error",
                 Self::KEY_NOT_FOUND => "Key not found",
                 Self::CRYPTO_ERROR => "Crypto error",
@@ -86,7 +88,9 @@ impl CrabError {
                 Self::TIMEOUT_ERROR => "Timeout error",
                 Self::NO_ENOUGH_SPACE => "No enough space",
                 Self::ENCODING_ERROR => "Encoding error",
+                Self::DNS_RESOLVE_ERROR => "DNS resolution error",
                 Self::ALREADY_SERVED => "Already served",
+                Self::NETWORK_ERROR => "Encoding error",
                 _ => "Unknown error code",
             },
             _ => "",

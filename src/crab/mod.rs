@@ -8,5 +8,5 @@ pub mod utils;
 
 pub use endpoint::{EndpointConfig, create_local_endpoint};
 pub use errors::CrabError;
-pub use node_handle::Handle;
+pub use node_handle::{ExecAckHandle, Handle,ExecAckResult};
 pub use types::{Node, NodeMetadata};

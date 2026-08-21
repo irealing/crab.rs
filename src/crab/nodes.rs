@@ -72,9 +72,11 @@ impl RemoteNodeInner {
                         }
                     }
                 }
-                Some(join_ret)=join_set.join_next()=>{
-                    if let Err(err) = join_ret{
-                        log::error!("node {} join task failed, err={:?}", self.node_id(), err);
+                Some(join_ret)=join_set.join_next(),if !join_set.is_empty()=>{
+                    match join_ret{
+                        Err(err)=>{log::error!("node {} task join error {:?}",self.node_id(),err);},
+                        Ok(Err(err))=>{log::error!("node {} task error {:?}",self.node_id(),err);},
+                        _=>{}
                     }
                 }
                 _=cancel.cancelled()=>{
@@ -85,8 +87,10 @@ impl RemoteNodeInner {
         }
         drop(task_rx);
         while let Some(ret) = join_set.join_next().await {
-            if let Err(err) = ret {
-                log::error!("node {} join task failed, err={:}", self.node_id(), err);
+            match ret{
+                Err(err)=>{log::error!("node {} task join error {:?}",self.node_id(),err);},
+                Ok(Err(err))=>{log::warn!("node {} task error {:?}",self.node_id(),err);},
+                _=>{}
             }
         }
         log::info!("node {} all async task done.", self.node_id());

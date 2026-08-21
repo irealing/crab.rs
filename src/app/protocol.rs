@@ -1,21 +1,20 @@
 mod base;
 
 mod commands;
-mod forwarder;
-mod http;
+pub mod forwarder;
 mod proto;
-mod tcp;
+#[cfg(feature = "socks5")]
+pub mod socks5;
 mod types;
-mod udp;
 mod util;
-
-#[cfg(feature = "tcp_forward")]
-pub use tcp::TcpForwarder;
-pub use types::{CommandExecutor, HttpForwarder};
-
+#[cfg(feature = "api")]
 pub use commands::{DirEntry, FileMetadata, WriteFile};
+#[cfg(any(feature = "socks5"))]
+pub use forwarder::tcp::TcpForwardParams;
+#[cfg(any(feature = "api"))]
+pub use types::CommandExecutor;
+
 pub use proto::AppProtocol;
-#[cfg(feature = "tcp_forward")]
-pub use tcp::TcpForwardParams;
-#[cfg(feature = "udp_forward")]
-pub use udp::{SessionOption, UdpForwarder, UdpForwarderHandle, UdpPacketWriter};
+
+#[cfg(feature = "api")]
+pub use forwarder::http::worker::HttpForwarder;

@@ -125,7 +125,12 @@ where
             .write_message(Method::Command, MessageHeader::OPTION_NONE, &self.cmd)
             .await
         {
-            log::warn!("AsyncStreamTask write command error: {}", err);
+            log::warn!("MultiStageTask write command error: {}", err);
+            let _ = self.initial_tx.send(Err(err));
+            return Ok(());
+        }
+        if let Err(err) = stream.read_ack().await {
+            log::warn!("MultiStageTask read ack error: {}", err);
             let _ = self.initial_tx.send(Err(err));
             return Ok(());
         }
