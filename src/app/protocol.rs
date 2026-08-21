@@ -7,14 +7,13 @@ mod proto;
 pub mod socks5;
 mod types;
 mod util;
+#[cfg(feature = "api")]
 pub use commands::{DirEntry, FileMetadata, WriteFile};
 #[cfg(any(feature = "socks5"))]
 pub use forwarder::tcp::TcpForwardParams;
 #[cfg(any(feature = "api"))]
 pub use types::CommandExecutor;
 
-#[cfg(feature = "udp_forward")]
-pub use forwarder::udp::{SessionOption, UdpForwarder, UdpPacketWriter};
 pub use proto::AppProtocol;
 
 #[cfg(feature = "api")]

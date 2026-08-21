@@ -1,4 +1,4 @@
-use super::session::{Session, TcpSession};
+use super::session::{Session, TcpSession, UdpSession};
 use super::types::{AuthConfig, Config};
 use crate::app::ServiceProvider;
 use crab::utils::runit::OnceWorker;
@@ -88,33 +88,27 @@ impl<T> OnceWorker for Handshake<T> {
                 return Ok(());
             }
         };
-        match cmd {
-            Command::Associate(associate, _) => {
-                let _ = associate
-                    .reply(Reply::CommandNotSupported, Address::unspecified())
-                    .await;
-                Ok(())
-            }
-            Command::Connect(conn, address) => {
-                let sess = Session::Tcp(TcpSession {
-                    handle: self.handle,
-                    conn,
-                    address,
-                });
-                let _ = self
-                    .sender
-                    .send(sess)
-                    .await
-                    .inspect_err(|_| log::error!("Socks5Server Session worker closed"));
-                Ok(())
-            }
+        let sess = match cmd {
+            Command::Associate(associate, address) => Session::Udp(UdpSession {
+                associate,
+                address,
+            }),
+            Command::Connect(conn, address) => Session::Tcp(TcpSession {
+                handle: self.handle,
+                conn,
+                address,
+            }),
             Command::Bind(bind, _) => {
                 let _ = bind
                     .reply(Reply::CommandNotSupported, Address::unspecified())
                     .await;
-                Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR))
+                return Err(CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR));
             }
-        }
+        };
+        self.sender
+            .send(sess)
+            .await
+            .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))
     }
 }
 #[async_trait::async_trait]

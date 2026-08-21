@@ -46,6 +46,7 @@ impl CrabError {
     pub const ALREADY_SERVED: u32 = 27;
     pub const ENCODING_ERROR: u32 = 28;
     pub const DNS_RESOLVE_ERROR: u32 = 29;
+    pub const NETWORK_ERROR: u32 = 30;
     pub const ILLEGAL_ERROR: u32 = 0xffff_fffe;
     pub const UNKNOWN_ERROR: u32 = 0xffff_ffff;
     pub fn err_no(&self) -> u32 {
@@ -89,6 +90,7 @@ impl CrabError {
                 Self::ENCODING_ERROR => "Encoding error",
                 Self::DNS_RESOLVE_ERROR => "DNS resolution error",
                 Self::ALREADY_SERVED => "Already served",
+                Self::NETWORK_ERROR => "Encoding error",
                 _ => "Unknown error code",
             },
             _ => "",

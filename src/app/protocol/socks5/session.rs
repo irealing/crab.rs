@@ -5,9 +5,10 @@ use crate::app::protocol::types::Command;
 use crab::proto::Stream;
 use crab::utils::runit::OnceWorker;
 use crab::{CrabError, Handle};
-use socks5_server::Connect;
-use socks5_server::connection::connect::state::NeedReply;
+use socks5_server::connection::associate::state::NeedReply as AssociateNeedReply;
+use socks5_server::connection::connect::state::NeedReply as ConnectNeedReply;
 use socks5_server::proto::{Address as Socks5Addr, Reply};
+use socks5_server::{Associate, Connect};
 use std::net::SocketAddr;
 use tokio_util::sync::CancellationToken;
 
@@ -26,7 +27,7 @@ impl OnceWorker for Session {
 }
 pub struct TcpSession {
     pub handle: Handle,
-    pub conn: Connect<NeedReply>,
+    pub conn: Connect<ConnectNeedReply>,
     pub address: Socks5Addr,
 }
 impl TcpSession {
@@ -52,7 +53,7 @@ impl TryFrom<Socks5Addr> for Address {
 }
 #[async_trait::async_trait]
 impl OnceWorker for TcpSession {
-    async fn serve(self, token: CancellationToken) -> Result<(), CrabError> {
+    async fn serve(self, _: CancellationToken) -> Result<(), CrabError> {
         let target_address = match self.address.try_into() {
             Ok(address) => address,
             Err(err) => {
@@ -97,10 +98,24 @@ impl OnceWorker for TcpSession {
         Ok(())
     }
 }
-pub struct UdpSession {}
+pub struct UdpSession {
+    pub(super) associate: Associate<AssociateNeedReply>,
+    pub(super) address: Socks5Addr,
+}
+
 #[async_trait::async_trait]
 impl OnceWorker for UdpSession {
-    async fn serve(self, token: CancellationToken) -> Result<(), CrabError> {
-        todo!()
+    async fn serve(self, _: CancellationToken) -> Result<(), CrabError> {
+        self.associate
+            .reply(Reply::CommandNotSupported, Socks5Addr::unspecified())
+            .await
+            .map_err(|(err, _)| {
+                log::warn!(
+                    "socks5 proxy forward command not supported,reply error {}",
+                    err
+                );
+                CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR)
+            })?;
+        Ok(())
     }
 }

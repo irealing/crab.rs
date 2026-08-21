@@ -155,6 +155,7 @@ where
         self.worker.serve(token).await
     }
 }
+
 #[async_trait::async_trait]
 pub trait InvokeWithCancel<T>
 where
@@ -170,7 +171,11 @@ where
     T: Send,
 {
     async fn invoke(self, cancel: CancellationToken) -> Result<T, CrabError> {
+        if cancel.is_cancelled() {
+            return Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR));
+        }
         tokio::select! {
+            biased;
             _=cancel.cancelled()=>{
                 Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR))
             }
