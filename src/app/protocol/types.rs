@@ -1,7 +1,8 @@
 use super::super::ServiceProvider;
 use super::commands::{DeleteCommand, DirCommand, DirEntry, FileMetadata, ReadFile, WriteFile};
+use super::forwarder::Address;
 use super::forwarder::tcp::{TcpForwardHandler, TcpForwardParams};
-use super::forwarder::udp::{UdpForwardHandler, UdpForwardParams};
+use super::forwarder::udp::UdpForwardHandler;
 use crate::app::utils::http::HttpRequest;
 use crab::CrabError;
 use crab::proto::{AckMessage, Executor, MessageHeader, Stream, TaskHandle};
@@ -19,7 +20,7 @@ pub enum Command {
     WriteFile(WriteFile),
     HttpProxy(HttpRequest),
     TcpForward(TcpForwardParams),
-    UdpForward(UdpForwardParams),
+    UdpForward(Address),
 }
 impl Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
