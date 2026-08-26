@@ -89,9 +89,9 @@ impl<T> OnceWorker for Handshake<T> {
             }
         };
         let sess = match cmd {
-            Command::Associate(associate, address) => Session::Udp(UdpSession {
+            Command::Associate(associate, _) => Session::Udp(UdpSession {
+                handle: self.handle,
                 associate,
-                address,
             }),
             Command::Connect(conn, address) => Session::Tcp(TcpSession {
                 handle: self.handle,

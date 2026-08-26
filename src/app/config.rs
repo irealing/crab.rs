@@ -1,15 +1,17 @@
-use std::{fs, str::FromStr};
-
+#[cfg(feature = "tcp_forward")]
+use crate::app::protocol::forwarder::TcpForwardOption;
 #[cfg(feature = "socks5")]
 use crate::protocol::socks5::Config as SocksConfig;
 use crab::{CrabError, EndpointConfig, utils::crypto::Config as TLSConfig};
 use serde::Deserialize;
-#[cfg(feature = "tcp_forward")]
-use crate::app::protocol::forwarder::TcpForwardOption;
+use std::net::SocketAddr;
+use std::{fs, str::FromStr};
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub node_id: String,
+    #[cfg(feature = "api")]
+    pub http_api: Option<SocketAddr>,
     pub endpoint: EndpointConfig,
     pub tls: TLSConfig,
     #[cfg(feature = "tcp_forward")]

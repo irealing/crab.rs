@@ -1,11 +1,10 @@
 use super::types::{Address, PacketHeader};
+use super::udp_util::copy_udp_stream;
 use crate::app::ServiceProvider;
 use crate::app::protocol::types::CommandHandler;
 use binrw::BinWrite;
-use bytes::BytesMut;
 use crab::CrabError;
 use crab::proto::{AckMessage, MessageHeader, Stream};
-use crab::utils::runit::InvokeWithCancel;
 use quinn::{RecvStream, SendStream};
 use std::io::Cursor;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -14,7 +13,6 @@ use tokio::io::AsyncReadExt;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-
 pub const UDP_FORWARD_MTU: usize = 1500;
 const OVER_PACKET_TAG: u16 = 1 << 15;
 const PACKET_LEN_MASK: u16 = 0xffff ^ OVER_PACKET_TAG;
@@ -87,32 +85,6 @@ impl UdpPacketWriter for Mutex<SendStream> {
         Ok(buf.len())
     }
 }
-pub async fn copy_udp_packet<R, W>(
-    cancel: CancellationToken,
-    mut reader: R,
-    writer: W,
-) -> Result<(), CrabError>
-where
-    R: UdpPacketReader + Send,
-    W: UdpPacketWriter + Send,
-{
-    let copy = async move || -> Result<(), CrabError> {
-        let mut buf = BytesMut::with_capacity(UDP_FORWARD_MTU);
-        buf.resize(UDP_FORWARD_MTU, 0);
-        loop {
-            let (address, data) = reader.read_packet(&mut buf).await?;
-            let addr = match address.resolve().await {
-                Ok(addr) => addr,
-                Err(err) => {
-                    log::warn!("failed to resolve address: {}", err);
-                    continue;
-                }
-            };
-            writer.send_to(data, addr).await?;
-        }
-    };
-    copy.invoke(cancel).await
-}
 
 pub struct UdpForwardHandler {
     via: Option<SocketAddr>,
@@ -166,7 +138,7 @@ impl CommandHandler for UdpForwardHandler {
                 stream
                     .write_message(header.method, header.option, &local_addr)
                     .await?;
-                Arc::new(sock)
+                sock
             }
             Err(err) => {
                 stream
@@ -176,16 +148,6 @@ impl CommandHandler for UdpForwardHandler {
             }
         };
         stream.read_ack().await?;
-        let (writer, reader) = stream.split();
-        match tokio::try_join!(
-            copy_udp_packet(cancel.clone(), reader, sock.clone()),
-            copy_udp_packet(cancel.clone(), sock.clone(), Mutex::new(writer))
-        ) {
-            Ok(_) => Ok(()),
-            Err(err) => {
-                log::error!("udp forward handle error: {}", err);
-                Err(err)
-            }
-        }
+        copy_udp_stream(cancel, stream, sock).await
     }
 }

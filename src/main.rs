@@ -39,11 +39,10 @@ async fn start(cfg: config::Config) -> Result<(), CrabError> {
     let mut worker: Vec<Arc<dyn Worker>> = Vec::new();
     #[cfg(feature = "api")]
     {
-        let api_worker = BaseApiWorker(
-            cfg.endpoint.bind_address,
-            vec![Arc::new(CtrlWorker::new(provider.clone()))],
-        );
-        worker.push(Arc::new(api_worker));
+        if let Some(addr) = cfg.http_api {
+            let api_worker = BaseApiWorker(addr, vec![Arc::new(CtrlWorker::new(provider.clone()))]);
+            worker.push(Arc::new(api_worker));
+        }
     }
     #[cfg(feature = "tcp_forward")]
     {

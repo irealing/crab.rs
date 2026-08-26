@@ -1,6 +1,6 @@
 use super::super::forwarder::tcp_forward;
 use crate::app::protocol::TcpForwardParams;
-use crate::app::protocol::forwarder::Address;
+use crate::app::protocol::forwarder::{Address, copy_udp_stream};
 use crate::app::protocol::types::Command;
 use crab::proto::Stream;
 use crab::utils::runit::OnceWorker;
@@ -9,7 +9,8 @@ use socks5_server::connection::associate::state::NeedReply as AssociateNeedReply
 use socks5_server::connection::connect::state::NeedReply as ConnectNeedReply;
 use socks5_server::proto::{Address as Socks5Addr, Reply};
 use socks5_server::{Associate, Connect};
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use tokio::net::UdpSocket;
 use tokio_util::sync::CancellationToken;
 
 pub enum Session {
@@ -99,23 +100,63 @@ impl OnceWorker for TcpSession {
     }
 }
 pub struct UdpSession {
+    pub(super) handle: Handle,
     pub(super) associate: Associate<AssociateNeedReply>,
-    pub(super) address: Socks5Addr,
 }
-
+impl UdpSession {
+    async fn prepare(&self) -> Result<(UdpSocket, SocketAddr), CrabError> {
+        let peer_addr = self.associate.peer_addr()?;
+        let sock =
+            UdpSocket::bind(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))).await?;
+        sock.connect(peer_addr).await?;
+        let local_addr = sock.local_addr()?;
+        Ok((sock, local_addr))
+    }
+}
 #[async_trait::async_trait]
 impl OnceWorker for UdpSession {
     async fn serve(self, _: CancellationToken) -> Result<(), CrabError> {
-        self.associate
-            .reply(Reply::CommandNotSupported, Socks5Addr::unspecified())
+        let (sock, local_addr) = match self.prepare().await {
+            Ok((sock, local_addr)) => (sock, local_addr),
+            Err(err) => {
+                log::error!("alloc local addr error {}", err);
+                return Err(err);
+            }
+        };
+        let (handle, _) = match self
+            .handle
+            .exec_ack::<_, SocketAddr, _>(Command::UdpForward(None))
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log::warn!("exec udp forward command error {}", err);
+                let _ = self
+                    .associate
+                    .reply(Reply::NetworkUnreachable, Socks5Addr::unspecified())
+                    .await;
+                return Err(err);
+            }
+        };
+        let mut associate = self
+            .associate
+            .reply(Reply::Succeeded, Socks5Addr::SocketAddress(local_addr))
             .await
             .map_err(|(err, _)| {
-                log::warn!(
-                    "socks5 proxy forward command not supported,reply error {}",
-                    err
-                );
-                CrabError::ErrorCode(CrabError::UNSUPPORTED_ERROR)
+                log::warn!("udp forward error {}", err);
+                CrabError::ErrorCodeWithMessage(CrabError::NETWORK_ERROR, err.to_string())
             })?;
+        let executor =
+            async move |cancel: CancellationToken, stream: Stream| -> Result<(), CrabError> {
+                tokio::select! {
+                    _=cancel.cancelled() =>Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR)),
+                    _=associate.wait_close()=>Err(CrabError::ErrorCode(CrabError::CANCELED_ERROR)),
+                    ret=copy_udp_stream(cancel.clone(), stream, sock)=>ret,
+                }
+            };
+        handle
+            .send(Ok(executor))
+            .map_err(|_| CrabError::ErrorCode(CrabError::CANCELED_ERROR))?;
         Ok(())
     }
 }
