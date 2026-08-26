@@ -1,6 +1,5 @@
 use super::super::ServiceProvider;
 use super::commands::{DeleteCommand, DirCommand, DirEntry, FileMetadata, ReadFile, WriteFile};
-use super::forwarder::Address;
 use super::forwarder::tcp::{TcpForwardHandler, TcpForwardParams};
 use super::forwarder::udp::UdpForwardHandler;
 use crate::app::utils::http::HttpRequest;
@@ -9,6 +8,7 @@ use crab::proto::{AckMessage, Executor, MessageHeader, Stream, TaskHandle};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use std::net::SocketAddr;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize, Serialize)]
@@ -20,7 +20,7 @@ pub enum Command {
     WriteFile(WriteFile),
     HttpProxy(HttpRequest),
     TcpForward(TcpForwardParams),
-    UdpForward(Address),
+    UdpForward(Option<SocketAddr>),
 }
 impl Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

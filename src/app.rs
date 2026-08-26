@@ -4,6 +4,7 @@ pub mod protocol;
 mod provider;
 pub mod types;
 pub mod utils;
+#[cfg(feature = "api")]
 pub mod workers;
 
 pub use manager::Manager;
