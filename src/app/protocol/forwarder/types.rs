@@ -2,7 +2,7 @@ use binrw::{BinRead, binrw};
 use crab::CrabError;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 use std::net::SocketAddr;
 use tokio::net::lookup_host;
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]

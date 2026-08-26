@@ -115,27 +115,34 @@ where
 }
 
 pub struct UdpForwardHandler {
-    params: Address,
+    via: Option<SocketAddr>,
 }
 impl UdpForwardHandler {
-    pub fn new(params: Address) -> Self {
-        Self { params }
+    pub fn new(params: Option<SocketAddr>) -> Self {
+        Self { via: params }
     }
     async fn prepare_socket(&self) -> Result<(UdpSocket, SocketAddr), CrabError> {
-        let (local_addr, remote_addr) = match self.params.resolve().await? {
-            SocketAddr::V4(params) => {
-                let local_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
-                (local_addr, SocketAddr::V4(params))
-            }
-            SocketAddr::V6(params) => {
-                let local_addr = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0));
-                (local_addr, SocketAddr::V6(params))
+        let sock = if let Some(addr) = self.via {
+            UdpSocket::bind(addr).await?
+        } else {
+            match UdpSocket::bind(SocketAddr::V6(SocketAddrV6::new(
+                Ipv6Addr::UNSPECIFIED,
+                0,
+                0,
+                0,
+            )))
+            .await
+            {
+                Ok(s) => s,
+                Err(err) => {
+                    log::error!("ipv6 bind error {}", err);
+                    UdpSocket::bind(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
+                        .await?
+                }
             }
         };
-        let sock = UdpSocket::bind(local_addr).await?;
-        sock.connect(remote_addr).await?;
-        let local_addr = sock.local_addr()?;
-        Ok((sock, local_addr))
+        let addr = sock.local_addr()?;
+        Ok((sock, addr))
     }
 }
 
