@@ -10,21 +10,30 @@ Crab 是一个点对点的 QUIC 通信工具。你把两个实例连起来，然
 - 在对方机器上**删除文件或目录**
 - 把对方的 HTTP 请求**代理**到本地网络
 - 把本地端口**转发**到对方内网的服务（TCP 隧道）
+- 在本地起一个 **SOCKS5 代理**，把流量导到对方内网
 
 所有通信走 QUIC + TLS 1.3，加密和连接复用开箱即用。
 
 ## 架构
 
-实例之间对等连接，谁都可以向谁发命令。你只需决定自己是**监听模式**（等人连）还是**连接模式**（主动去连别人）：
+实例之间对等连接，谁都可以向谁发命令。`listen` 和 `remote_addr` 是**两个独立的开关**，不是二选一：
+
+- `listen = true` → 开启监听，接受别人连进来
+- `remote_addr` 配置了 → 主动连出去
+
+两者可以同时开启，也可以只开其中一个。同一个实例既可以是服务端又可以是客户端：
 
 ```
-实例 A（监听模式）                 实例 B（连接模式）
-listen = true                      listen = false
-                                    remote_addr = ["A:443"]
-     │                                  │
-     └────────── QUIC 连接 ─────────────┘
-                        │
-                TCP 转发 / 文件读写 / HTTP 代理
+实例 A                         实例 B
+listen = true                  listen = true
+remote_addr = ["B:443"]        remote_addr = ["A:443"]
+     │                              │
+     └──────────── QUIC ────────────┘
+                 双向连接
+
+实例 C（纯客户端，NAT 后面）
+listen = false                 ← 不监听
+remote_addr = ["A:443"]        ← 只主动连 A
 ```
 
 一个实际场景（端口转发）：
@@ -34,7 +43,6 @@ listen = true                      listen = false
                            QUIC 加密隧道
                           [Crab B] → 内网服务 :80
 ```
- 
 ## 命令
 
 | 命令 | 作用 |
@@ -46,6 +54,7 @@ listen = true                      listen = false
 | `WriteFile` | 写入文件内容（流式） |
 | `HttpProxy` | 让对端代发 HTTP 请求 |
 | `TCPForward` | 本地端口转发到对端内网 |
+| `Socks5` | 本地 SOCKS5 代理，流量走对端 |
 
 ## 文件读写
 
@@ -101,6 +110,33 @@ target_address = "10.0.0.5:3306"
 | `keepalive_interval` | 15 | TCP keepalive 探测间隔 |
 | `keepalive_retries` | 3 | TCP keepalive 重试次数 |
 
+## SOCKS5 代理（需要 `socks5` feature）
+
+在本地起一个 SOCKS5 代理服务器，所有代理请求通过 QUIC 隧道转发到对端，由对端访问目标。支持 TCP CONNECT 和 UDP ASSOCIATE（含用户名密码认证）：
+
+```toml
+[[socks5_proxy]]
+listen = "127.0.0.1:1080"   # 本地 SOCKS5 监听地址
+target = "host-b"            # 对端实例的 node_id
+
+# 可选：用户名密码认证，不写这段则无需认证
+[socks5_proxy.auth]
+username = "user"
+password = "pass"
+```
+
+然后配置浏览器或 curl 使用该代理：
+
+```bash
+curl --socks5 127.0.0.1:1080 http://example.com
+```
+
+流量路径：
+
+```
+你 → SOCKS5 :1080 → [Crab A] → QUIC 隧道 → [Crab B] → 目标网站
+```
+
 ## HTTP 代理
 
 让对端代发 HTTP 请求，适用于跨网络访问资源（需要启用 `api` feature）：
@@ -116,7 +152,11 @@ curl -x http://127.0.0.1:3000/ctrl/node-b/proxy \
 
 ## HTTP API（需要 `api` feature）
 
-启用 HTTP API 后，可以通过 curl 直接向节点发命令。API 地址默认由 `endpoint.bind_address` 指定，路由前缀为 `/ctrl/{node_id}/`。
+启用 HTTP API 后，可以通过 curl 直接向节点发命令。API 监听地址由配置中的 `http_api` 字段独立指定（与 `endpoint.bind_address` 无关），路由前缀为 `/ctrl/{node_id}/`：
+
+```toml
+http_api = "0.0.0.0:3000"   # 不写则不启动 HTTP API
+```
 
 所有接口的响应格式：
 
@@ -247,6 +287,8 @@ openssl req -x509 -newkey rsa:4096 \
 # a.toml
 node_id = "host-a"
 
+http_api = "0.0.0.0:3000"
+
 [endpoint]
 bind_address = "0.0.0.0:443"
 listen = true
@@ -282,8 +324,7 @@ cargo run --features bin -- --config b.toml
 
 B 启动后会自动连到 A，握手完成双方状态变为 `Running`。
 
-### 4. TCP 转发
-#### 端口转发
+### 4. TCP 端口转发
 
 在 A 的配置里追加：
 
@@ -301,15 +342,35 @@ keepalive_retries = 3
 
 重启 A，访问 `http://127.0.0.1:8080` 即可穿透到 B 的内网。
 
+### 5. SOCKS5 代理
+
+在 A 的配置里追加（需要 `socks5` feature）：
+
+```toml
+[[socks5_proxy]]
+listen = "127.0.0.1:1080"
+target = "host-b"
+```
+
+重启 A，然后：
+
+```bash
+curl --socks5 127.0.0.1:1080 http://10.0.0.1
+```
+
+通过代理访问 B 内网的任何地址。
+
 ## 配置参考
 
 ```toml
 node_id = "my-node"
 
+http_api = "0.0.0.0:3000"   # HTTP API 监听地址（可选，需要 api feature）
+
 [endpoint]
-bind_address = "0.0.0.0:443"
-listen = true
-remote_addr = ["peer-a:443", "peer-b:443"]
+bind_address = "0.0.0.0:443"   # QUIC 监听/绑定地址
+listen = true                   # 是否开启监听，接受别人连接
+remote_addr = ["peer-a:443"]   # 要主动连接的节点（可选，可多个）
 
 [endpoint.options]
 connect_timeout = 10
@@ -328,13 +389,15 @@ verify_client = false
 
 | 配置项 | 说明 |
 |--------|------|
-| `endpoint.listen` | `true` = 监听模式（等人连），`false` = 连接模式（主动去连） |
-| `endpoint.remote_addr` | 连接模式下的目标地址列表，任一可用即可 |
+| `http_api` | HTTP API 监听地址，不写则不启动（需要 `api` feature） |
+| `endpoint.listen` | 是否开启监听接受连接，`true`/`false` 均可与 `remote_addr` 同时使用 |
+| `endpoint.remote_addr` | 要主动连接的节点地址列表，可多个；与 `listen` 相互独立 |
 | `endpoint.options` | 超时参数，不填则使用默认值 |
 | `tls.use_system_ca` | 是否加载系统根证书 |
 | `tls.ca_path` | 额外 CA 证书 |
 | `tls.verify_client` | 是否开启双向 TLS 验证 |
 | `tcp_forward` | TCP 转发规则数组，每一条定义一个本地端口到对端目标的映射（需要 `tcp_forward` feature） |
+| `socks5_proxy` | SOCKS5 代理规则数组（需要 `socks5` feature） |
 
 ## 构建
 
@@ -344,6 +407,7 @@ Crab 的 feature 决定了二进制运行时的角色：**被控端**（听命�
 cargo build                                            # 仅库（供第三方集成）
 cargo build --features bin                             # 二进制：被控端（接受文件读写、代理等命令）
 cargo build --features bin,tcp_forward                 # 被控端 + TCP 转发控制端
+cargo build --features bin,socks5                      # 被控端 + SOCKS5 代理控制端
 cargo build --features bin,api                         # 被控端 + HTTP API 控制端
 cargo build --features full                            # 被控端 + 完整控制端能力
 ```
@@ -355,8 +419,9 @@ feature 说明：
 | (默认) | — | 仅框架库，供第三方程序集成 |
 | `bin` | 被控端 | 接受并执行命令（文件管理、HTTP 代理） |
 | `tcp_forward` | 控制端 | 本地监听端口，转发到被控端内网 |
+| `socks5` | 控制端 | 本地 SOCKS5 代理，流量走被控端（支持 TCP/UDP） |
 | `api` | 控制端 | HTTP API，通过 curl 向被控端发命令 |
-| `full` | 两者 | `bin` + `tcp_forward` + `api`，完整的收发能力 |
+| `full` | 两者 | `bin` + `tcp_forward` + `socks5` + `api`，完整的收发能力 |
 
 典型部署场景：
 
@@ -373,6 +438,7 @@ feature 说明：
 | bincode | 消息序列化 |
 | binrw | 二进制协议头编解码 |
 | hyper | HTTP 代理客户端 |
+| socks5-server | SOCKS5 代理协议实现 |
 
 ## 许可证
 
